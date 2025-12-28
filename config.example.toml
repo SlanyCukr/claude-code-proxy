@@ -1,0 +1,24 @@
+# Claude Code Proxy Configuration
+# Copy to config.toml and set your z.ai API key
+
+[proxy]
+port = 8080
+debug = true
+
+[anthropic]
+base_url = "https://api.anthropic.com"
+
+[zai]
+base_url = "https://api.z.ai/api/anthropic"
+api_key = ""  # Required - get from z.ai dashboard
+
+[routing]
+subagent_markers = [
+    "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+]
+
+[limits]
+max_body_size = 52428800  # 50MB
+timeout = 300.0           # 5 minutes
+max_connections = 100
+max_keepalive = 20

@@ -20,15 +20,18 @@ def create_app(config: Config, logger: RequestLogger) -> FastAPI:
     """Create and configure the FastAPI application."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        limits = httpx.Limits(
+            max_connections=config.limits.max_connections,
+            max_keepalive_connections=config.limits.max_keepalive,
+        )
         anthropic_client = httpx.AsyncClient(
             base_url=config.anthropic.base_url,
-            timeout=300.0,
+            timeout=config.limits.timeout,
             limits=limits,
         )
         zai_client = httpx.AsyncClient(
             base_url=config.zai.base_url,
-            timeout=300.0,
+            timeout=config.limits.timeout,
             limits=limits,
         )
         app.state.upstream_client = UpstreamClient(anthropic_client, zai_client)

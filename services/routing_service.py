@@ -43,9 +43,11 @@ class RoutingService:
     ) -> PreparedRequest:
         """Prepare /v1/messages request for routing."""
         decision = self._decider.decide(body)
-        body = self._sanitizer.sanitize(body)
+        is_zai = decision.route == "zai"
+        # Keep MCP tools for z.ai subagents, strip for main session
+        body = self._sanitizer.sanitize(body, strip_mcp=not is_zai)
 
-        if decision.route == "zai":
+        if is_zai:
             return self._zai.prepare_messages(body, headers, decision.model_override)
 
         return self._anthropic.prepare_messages(body, headers)
@@ -57,9 +59,10 @@ class RoutingService:
     ) -> PreparedRequest:
         """Prepare /v1/messages/count_tokens request for routing."""
         decision = self._decider.decide(body)
-        body = self._sanitizer.sanitize(body)
+        is_zai = decision.route == "zai"
+        body = self._sanitizer.sanitize(body, strip_mcp=not is_zai)
 
-        if decision.route == "zai":
+        if is_zai:
             return self._zai.prepare_count_tokens(body, headers)
 
         return self._anthropic.prepare_count_tokens(body, headers)

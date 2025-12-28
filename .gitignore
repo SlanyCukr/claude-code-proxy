@@ -50,3 +50,6 @@ logs/
 # Environment variables
 .env
 .env.local
+
+# Config with secrets
+config.toml

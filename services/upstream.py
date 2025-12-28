@@ -19,7 +19,7 @@ class UpstreamClient:
         zai_client: httpx.AsyncClient,
     ) -> None:
         self._clients = {
-            "anthropic": anthropic_client,
+            "Anthropic": anthropic_client,
             "z.ai": zai_client,
         }
 
@@ -172,5 +172,4 @@ class UpstreamClient:
 
     def _client_for(self, route_name: str) -> httpx.AsyncClient:
         """Select the appropriate cached client."""
-        key = "z.ai" if "z.ai" in route_name.lower() else "anthropic"
-        return self._clients[key]
+        return self._clients.get(route_name, self._clients["Anthropic"])

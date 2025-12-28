@@ -1,12 +1,16 @@
 """Configuration models and loading."""
 
-import json
+import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
+# User data directory (for OAuth tokens)
 CONFIG_DIR = Path.home() / ".config" / "claude-code-proxy"
-CONFIG_FILE = CONFIG_DIR / "config.json"
+
+# Config files in repo root
+CONFIG_FILE = Path(__file__).parent.parent / "config.toml"
+CONFIG_EXAMPLE = Path(__file__).parent.parent / "config.example.toml"
 
 
 class ProxySettings(BaseModel):
@@ -29,28 +33,30 @@ class RoutingSettings(BaseModel):
     )
 
 
+class LimitsSettings(BaseModel):
+    max_body_size: int = 50 * 1024 * 1024  # 50MB
+    timeout: float = 300.0  # 5 minutes
+    max_connections: int = 100
+    max_keepalive: int = 20
+
+
 class Config(BaseModel):
     proxy: ProxySettings = Field(default_factory=ProxySettings)
     anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)
     zai: ZaiSettings = Field(default_factory=ZaiSettings)
     routing: RoutingSettings = Field(default_factory=RoutingSettings)
+    limits: LimitsSettings = Field(default_factory=LimitsSettings)
 
 
 def load_config() -> Config:
-    """Load configuration from JSON file, creating default if needed."""
+    """Load config from TOML. Exit with message if missing."""
     if not CONFIG_FILE.exists():
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        default = Config()
-        CONFIG_FILE.write_text(default.model_dump_json(indent=2))
-        return default
+        raise SystemExit(
+            f"Config not found: {CONFIG_FILE}\n"
+            f"Copy {CONFIG_EXAMPLE.name} to {CONFIG_FILE.name} and set your API key."
+        )
 
-    try:
-        data = json.loads(CONFIG_FILE.read_text())
-        return Config.model_validate(data)
-    except (json.JSONDecodeError, ValidationError):
-        # Backup corrupted config and recreate default
-        backup = CONFIG_FILE.with_suffix(".json.bak")
-        CONFIG_FILE.rename(backup)
-        default = Config()
-        CONFIG_FILE.write_text(default.model_dump_json(indent=2))
-        return default
+    with CONFIG_FILE.open("rb") as f:
+        data = tomllib.load(f)
+
+    return Config.model_validate(data)

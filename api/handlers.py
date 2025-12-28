@@ -11,13 +11,13 @@ from core.config import Config
 from core.protocols import RequestLogger
 from ui.log_utils import write_incoming_log
 
-MAX_BODY_SIZE = 50 * 1024 * 1024  # 50MB
 
-
-async def _parse_json_body(request: Request) -> tuple[dict[str, Any], dict[str, str]] | Response:
+async def _parse_json_body(
+    request: Request, max_body_size: int
+) -> tuple[dict[str, Any], dict[str, str]] | Response:
     """Parse request body as JSON, return (body, headers) or error Response."""
     raw_body = await request.body()
-    if len(raw_body) > MAX_BODY_SIZE:
+    if len(raw_body) > max_body_size:
         return Response(
             content='{"error": "Request body too large"}',
             status_code=413,
@@ -46,7 +46,7 @@ async def handle_messages(
     logger: RequestLogger,
 ) -> Response | StreamingResponse:
     """Handle /v1/messages endpoint with routing logic."""
-    result = await _parse_json_body(request)
+    result = await _parse_json_body(request, config.limits.max_body_size)
     if isinstance(result, Response):
         return result
     body, headers = result
@@ -70,7 +70,7 @@ async def handle_count_tokens(
     logger: RequestLogger,
 ) -> Response:
     """Handle /v1/messages/count_tokens with routing logic."""
-    result = await _parse_json_body(request)
+    result = await _parse_json_body(request, config.limits.max_body_size)
     if isinstance(result, Response):
         return result
     body, headers = result

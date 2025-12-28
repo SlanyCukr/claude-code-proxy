@@ -56,11 +56,11 @@ Subagent detection uses markers and regex patterns in `core/router.py`:
 - `AIR_MODEL_PATTERNS`: Simple tasks routed to cheaper `glm-4.5-air` model
 
 ### Configuration
-- **Config**: `~/.config/claude-code-proxy/config.json` (z.ai API key, proxy settings)
-- **Tokens**: `~/.config/claude-code-proxy/tokens.json` (OAuth tokens, falls back to `~/.claude/.credentials.json`)
+- **Config**: `config.toml` in repo root (copy from `config.example.toml`, set z.ai API key)
+- **Tokens**: OAuth tokens from `~/.claude/.credentials.json`
 
 ### Logging
-Runtime logs are written to `logs/` with subfolders: `incoming/`, `zai/`, `anthropic/`
+Runtime logs written to `logs/` with subfolders: `incoming/`, `zai/`, `anthropic/`
 
 ## Code Style
 - Python 3.11+, 4-space indentation

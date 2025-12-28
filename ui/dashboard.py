@@ -66,9 +66,20 @@ class Dashboard:
         path: str,
     ) -> None:
         """Log a request routed to Anthropic (main session)."""
+        # Always write logs
+        write_anthropic_log(model, body, streaming, path=path)
+        prompt, tools = extract_request_info(body)
+        prompt_preview = prompt[:200] if prompt else ""
+        write_cli_log("ANTHROPIC", prompt_preview, model=model)
+
+        # Skip dashboard update for count_tokens and haiku models
+        if path == "/v1/messages/count_tokens" or "haiku" in model.lower():
+            with self._lock:
+                self._request_count["anthropic"] += 1
+            return
+
         with self._lock:
             self._request_count["anthropic"] += 1
-            prompt, tools = extract_request_info(body)
             self._main_session = RequestInfo(
                 model=model + (" (stream)" if streaming else ""),
                 prompt=prompt,
@@ -76,10 +87,6 @@ class Dashboard:
                 timestamp=datetime.now(),
             )
             self._refresh()
-
-            write_anthropic_log(model, body, streaming, path=path)
-            prompt_preview = prompt[:200] if prompt else ""
-            write_cli_log("ANTHROPIC", prompt_preview, model=model)
 
     def log_zai(
         self,
@@ -172,15 +179,7 @@ class Dashboard:
             content.add_column()
             content.add_column()
 
-            content.add_row("[bold]Model:[/bold]", self._main_session.model)
             content.add_row("[bold]Prompt:[/bold]", self._main_session.prompt or "[dim]—[/dim]")
-
-            if self._main_session.tools:
-                tools_str = ", ".join(self._main_session.tools)
-                if self._main_session.tools_count > 4:
-                    tools_str += f" (+{self._main_session.tools_count - 4})"
-                content.add_row("[bold]Tools:[/bold]", tools_str)
-
             content.add_row(
                 "[bold]Time:[/bold]",
                 self._main_session.timestamp.strftime("%H:%M:%S"),
@@ -195,20 +194,12 @@ class Dashboard:
         if self._subagents:
             table = Table(show_header=True, header_style="bold", expand=True, box=None)
             table.add_column("Time", style="dim", width=8)
-            table.add_column("Model", width=20)
-            table.add_column("Prompt", ratio=2)
-            table.add_column("Tools", ratio=1)
+            table.add_column("Prompt", ratio=1)
 
             for sa in self._subagents:
-                tools_str = ", ".join(sa.tools[:3])
-                if sa.tools_count > 3:
-                    tools_str += f" +{sa.tools_count - 3}"
-
                 table.add_row(
                     sa.timestamp.strftime("%H:%M:%S"),
-                    sa.model[:20],
-                    sa.prompt[:40] + "..." if len(sa.prompt) > 40 else sa.prompt,
-                    tools_str,
+                    sa.prompt[:80] + "..." if len(sa.prompt) > 80 else sa.prompt,
                 )
 
             content = table

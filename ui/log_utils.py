@@ -19,16 +19,21 @@ def extract_request_info(body: dict[str, Any]) -> tuple[str, list[str]]:
     prompt = ""
     messages = body.get("messages", [])
     if messages:
-        last_msg = messages[-1]
-        content = last_msg.get("content", "")
-        if isinstance(content, list):
-            texts = [
-                b.get("text", "")
-                for b in content
-                if isinstance(b, dict) and b.get("type") == "text"
-            ]
-            content = " ".join(texts)
-        prompt = content.replace("\n", " ").strip() if content else ""
+        # Find first user message (contains initial prompt for subagents)
+        first_user_msg = next(
+            (m for m in messages if m.get("role") == "user"),
+            None,
+        )
+        if first_user_msg:
+            content = first_user_msg.get("content", "")
+            if isinstance(content, list):
+                texts = [
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
+                content = " ".join(texts)
+            prompt = content.replace("\n", " ").strip() if content else ""
 
     tools = body.get("tools", [])
     tool_names = [t.get("name", "?") for t in tools if isinstance(t, dict)]
@@ -85,7 +90,7 @@ def write_anthropic_log(
     log_root: Path = LOG_ROOT,
 ) -> Path:
     """Write a single Anthropic request log entry."""
-    folder = _session_folder(log_root / "antrophic", body)
+    folder = _session_folder(log_root / "anthropic", body)
 
     # Cleanup old logs in session folder (keep only latest)
     _cleanup_session_folder(folder)
