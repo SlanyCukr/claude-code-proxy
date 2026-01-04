@@ -3,6 +3,15 @@
 import copy
 from typing import Any
 
+# Noise patterns in system-reminders that should be stripped (not user instructions)
+NOISE_PATTERNS = [
+    "TodoWrite tool hasn't been used",
+    "Plan mode is active",
+    "consider whether it would be considered malware",
+    "SessionStart:",
+    "UserPromptSubmit:",
+]
+
 
 class RequestTransformer:
     """Transform request bodies for upstream compatibility."""
@@ -24,11 +33,11 @@ class RequestTransformer:
         if isinstance(body.get("messages"), list):
             for msg in body["messages"]:
                 if isinstance(msg.get("content"), list):
-                    # Filter out system-reminder blocks
+                    # Filter out noise system-reminder blocks, preserve user context
                     msg["content"] = [
                         block
                         for block in msg["content"]
-                        if not self._is_system_reminder(block)
+                        if not self._is_noise_reminder(block)
                     ]
                     # Remove cache_control from remaining blocks
                     for block in msg["content"]:
@@ -38,11 +47,17 @@ class RequestTransformer:
         return body
 
     @staticmethod
-    def _is_system_reminder(block: dict) -> bool:
-        """Check if a content block is a system-reminder."""
+    def _is_noise_reminder(block: dict) -> bool:
+        """Check if a system-reminder is noise (not user context like claudeMd)."""
         if not isinstance(block, dict):
             return False
         if block.get("type") != "text":
             return False
         text = block.get("text", "")
-        return isinstance(text, str) and "<system-reminder>" in text
+        if not isinstance(text, str) or "<system-reminder>" not in text:
+            return False
+        # Preserve user context (CLAUDE.md content, rules, etc.)
+        if "# claudeMd" in text:
+            return False
+        # Strip known noise patterns
+        return any(pattern in text for pattern in NOISE_PATTERNS)

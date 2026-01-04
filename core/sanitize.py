@@ -19,6 +19,11 @@ DEFAULT_STRIPPED_AGENTS = {
 MCP_TOOL_PREFIX = "mcp__"
 MCP_TOOL_ALLOWLIST = {"mcp__codex__codex", "mcp__codex__codex-reply"}
 
+# Pre-compiled regex patterns for tool result stripping
+_TOOL_RESULT_OUTPUT_WRAPPER = re.compile(r"<output>\s*(.*?)\s*</output>", re.DOTALL)
+_TOOL_CALL_LOG_PATTERN = re.compile(r"^\[Tool: \w+\] \{.*?\}\n?", re.MULTILINE)
+_RESULT_SEPARATOR = "--- RESULT ---"
+
 # Pre-compiled regex patterns
 _OLD_OPENING_PATTERN = re.compile(
     r"Launch a new agent to handle complex, multi-step tasks autonomously\. "
@@ -67,6 +72,35 @@ def _contains_malware_marker(content: Any) -> bool:
     return False
 
 
+def _has_tool_call_logs(content: Any) -> bool:
+    """Check if content contains verbose tool call logs in <output> section."""
+    if isinstance(content, str):
+        return "<output>" in content and "[Tool: " in content
+    return False
+
+
+def _strip_tool_call_logs(content: str) -> str:
+    """Strip tool call logs from <output> section, keeping metadata and result."""
+    output_match = _TOOL_RESULT_OUTPUT_WRAPPER.search(content)
+    if not output_match:
+        return content
+
+    inner = output_match.group(1)
+
+    # Find the actual result after separator
+    if _RESULT_SEPARATOR in inner:
+        result_idx = inner.find(_RESULT_SEPARATOR)
+        cleaned_inner = inner[result_idx:].strip()  # Keep separator + result
+    else:
+        # No separator - strip tool call logs
+        cleaned_inner = _TOOL_CALL_LOG_PATTERN.sub("", inner).strip()
+
+    # Replace original <output> section with cleaned version
+    return content.replace(
+        output_match.group(0), f"<output>\n{cleaned_inner}\n</output>"
+    )
+
+
 class RequestSanitizer:
     """Strip unwanted request content before routing upstream."""
 
@@ -84,6 +118,7 @@ class RequestSanitizer:
         body = self._strip_tools(body, strip_mcp=strip_mcp)
         body = self._filter_task_tool(body)
         body = self._strip_system_reminders(body)
+        body = self._strip_tool_result_logs(body)
         return self._replace_system_prompt(body)
 
     def _strip_tools(self, body: dict[str, Any], *, strip_mcp: bool = True) -> dict[str, Any]:
@@ -131,7 +166,15 @@ class RequestSanitizer:
             # Replace opening text
             new_opening = (
                 "Delegate work to agents that run in isolation. "
-                "Preserves main session context while agents handle focused tasks."
+                "Preserves main session context while agents handle focused tasks.\n\n"
+                "**How to use effectively:**\n"
+                "- Give ONE small, focused task per agent - broad tasks lead to incomplete work\n"
+                "- Agents start fresh with no prior context - provide everything they need:\n"
+                "  - File paths to read (specs, docs, code to reference/modify)\n"
+                "  - Exact commands if they need to run builds, tests, docker, pre-commit hooks\n"
+                "  - Write a context file (e.g., /tmp/task-context.md) and pass its path if context is complex\n"
+                "- Don't paste file contents in the prompt - give paths and let agents read them\n"
+                "- If unsure about command structure, verify it in main session first, then pass exact commands to agent"
             )
             description = _OLD_OPENING_PATTERN.sub(new_opening, description)
 
@@ -173,6 +216,51 @@ class RequestSanitizer:
                         text = block.get("text", "")
                         if isinstance(text, str):
                             block["text"] = _MALWARE_REMINDER_PATTERN.sub("", text)
+
+        return body
+
+    def _strip_tool_result_logs(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Strip verbose tool call logs from tool_result content blocks."""
+        messages = body.get("messages")
+        if not isinstance(messages, list):
+            return body
+
+        # Check if any tool_result has tool call logs
+        needs_update = False
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and _has_tool_call_logs(block.get("content"))
+                ):
+                    needs_update = True
+                    break
+            if needs_update:
+                break
+
+        if not needs_update:
+            return body
+
+        body = copy.deepcopy(body)
+        for msg in body["messages"]:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    raw_content = block.get("content")
+                    if isinstance(raw_content, str) and _has_tool_call_logs(
+                        raw_content
+                    ):
+                        block["content"] = _strip_tool_call_logs(raw_content)
 
         return body
 

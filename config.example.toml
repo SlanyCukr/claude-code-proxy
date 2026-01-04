@@ -15,9 +15,11 @@ api_key = ""  # Required - get from z.ai dashboard
 [routing]
 # Patterns in system prompts that identify subagent requests (routed to z.ai)
 subagent_markers = [
+    # New zai-speckit-plugin agent patterns
+    "# Your Operating Instructions",
+    "These instructions define how you work.",
+    # Built-in Claude Code agents (Explore, Plan, etc.)
     "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
-    "# STOP - MANDATORY PRE-FLIGHT CHECK",
-    "=== CRITICAL: READ-ONLY MODE",
 ]
 
 [limits]
