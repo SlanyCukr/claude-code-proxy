@@ -38,7 +38,10 @@ def create_app(config: Config, logger: RequestLogger) -> FastAPI:
         app.state.routing_service = RoutingService(
             config=config,
             logger=logger,
-            decider=RouteDecider(config.routing.subagent_markers),
+            decider=RouteDecider(
+                config.routing.subagent_markers,
+                config.routing.anthropic_markers,
+            ),
             transformer=RequestTransformer(),
             sanitizer=RequestSanitizer(),
             header_builder=HeaderBuilder(),

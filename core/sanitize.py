@@ -42,6 +42,29 @@ _MALWARE_REMINDER_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Plan mode reminder transformations - replace built-in agents with plugin agents
+_PLAN_MODE_REPLACEMENTS = [
+    # Phase 1: Replace Explore with codebase-explorer
+    (
+        "In this phase you should only use the Explore subagent type.",
+        "In this phase you should use the codebase-explorer subagent type. "
+        "For investigating failures or debugging issues, use root-cause-agent instead.",
+    ),
+    (
+        "Launch up to 3 Explore agents IN PARALLEL",
+        "Launch up to 3 codebase-explorer agents IN PARALLEL",
+    ),
+    # Add research agent guidance after Phase 1
+    (
+        "3. After exploring the code, use the AskUserQuestion tool to clarify ambiguities in the user request up front.",
+        "3. After exploring the code, use the AskUserQuestion tool to clarify ambiguities in the user request up front.\n\n"
+        "**Research agents available:**\n"
+        "- **context7-docs**: Look up library documentation (FastAPI, React, etc.)\n"
+        "- **web-research**: Search for best practices, tutorials, error codes, or API docs not in Context7. "
+        "Also useful when investigating issues to look up error messages or stack traces.",
+    ),
+]
+
 
 def _agent_pattern(agent: str) -> re.Pattern[str]:
     return re.compile(rf"- {re.escape(agent)}:.*?\(Tools:.*?\)\n", re.DOTALL)
@@ -118,6 +141,7 @@ class RequestSanitizer:
         body = self._strip_tools(body, strip_mcp=strip_mcp)
         body = self._filter_task_tool(body)
         body = self._strip_system_reminders(body)
+        body = self._transform_plan_mode_reminder(body)
         body = self._strip_tool_result_logs(body)
         return self._replace_system_prompt(body)
 
@@ -216,6 +240,53 @@ class RequestSanitizer:
                         text = block.get("text", "")
                         if isinstance(text, str):
                             block["text"] = _MALWARE_REMINDER_PATTERN.sub("", text)
+
+        return body
+
+    def _transform_plan_mode_reminder(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Transform plan mode system reminder to use plugin agents."""
+        messages = body.get("messages")
+        if not isinstance(messages, list):
+            return body
+
+        # Check if plan mode reminder exists
+        plan_mode_marker = "Plan mode is active"
+        has_plan_mode = False
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, str) and plan_mode_marker in content:
+                has_plan_mode = True
+                break
+            if isinstance(content, list):
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "text"
+                        and plan_mode_marker in block.get("text", "")
+                    ):
+                        has_plan_mode = True
+                        break
+                if has_plan_mode:
+                    break
+
+        if not has_plan_mode:
+            return body
+
+        body = copy.deepcopy(body)
+        for msg in body["messages"]:
+            content = msg.get("content")
+            if isinstance(content, str):
+                for old, new in _PLAN_MODE_REPLACEMENTS:
+                    content = content.replace(old, new)
+                msg["content"] = content
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if isinstance(text, str):
+                            for old, new in _PLAN_MODE_REPLACEMENTS:
+                                text = text.replace(old, new)
+                            block["text"] = text
 
         return body
 

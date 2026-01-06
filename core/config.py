@@ -31,6 +31,7 @@ class RoutingSettings(BaseModel):
     subagent_markers: list[str] = Field(
         default_factory=lambda: ["You are a Claude agent, built on Anthropic's Claude Agent SDK."]
     )
+    anthropic_markers: list[str] = Field(default_factory=list)
 
 
 class LimitsSettings(BaseModel):

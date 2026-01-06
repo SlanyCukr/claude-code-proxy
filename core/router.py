@@ -15,20 +15,27 @@ class RouteDecision:
 class RouteDecider:
     """Decide whether a request should go to Anthropic or z.ai."""
 
-    def __init__(self, subagent_markers: list[str] | None = None):
+    def __init__(
+        self,
+        subagent_markers: list[str] | None = None,
+        anthropic_markers: list[str] | None = None,
+    ):
         self.subagent_markers = subagent_markers or []
+        self.anthropic_markers = anthropic_markers or []
 
     def decide(self, body: dict[str, Any]) -> RouteDecision:
         """Return the route based on system prompt patterns."""
-        if self._has_subagent_marker(body):
-            return RouteDecision(route="zai")
-        return RouteDecision(route="anthropic")
+        system_text = self._extract_system_text(body.get("system", []))
 
-    def _has_subagent_marker(self, body: dict[str, Any]) -> bool:
-        """Check if system prompt contains any subagent marker."""
-        system = body.get("system", [])
-        system_text = self._extract_system_text(system)
-        return any(marker in system_text for marker in self.subagent_markers)
+        # Check exclusions first - force Anthropic for specific agents
+        if any(marker in system_text for marker in self.anthropic_markers):
+            return RouteDecision(route="anthropic")
+
+        # Then check subagent markers
+        if any(marker in system_text for marker in self.subagent_markers):
+            return RouteDecision(route="zai")
+
+        return RouteDecision(route="anthropic")
 
     def _extract_system_text(self, system: str | list[Any]) -> str:
         """Extract all text from system prompt."""

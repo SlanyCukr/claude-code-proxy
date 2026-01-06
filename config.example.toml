@@ -21,6 +21,11 @@ subagent_markers = [
     # Built-in Claude Code agents (Explore, Plan, etc.)
     "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
 ]
+# Markers that force Anthropic routing (exclusions from z.ai)
+anthropic_markers = [
+    # Built-in Plan/Design agent - keep visible in main session
+    "You are a software architect and planning specialist for Claude Code.",
+]
 
 [limits]
 max_body_size = 52428800  # 50MB
