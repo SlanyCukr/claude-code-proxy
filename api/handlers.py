@@ -40,28 +40,51 @@ async def _parse_json_body(
     return body, headers
 
 
-async def handle_messages(
+async def _handle_proxy_request(
     request: Request,
     config: Config,
     logger: RequestLogger,
+    endpoint: str,
 ) -> Response | StreamingResponse:
-    """Handle /v1/messages endpoint with routing logic."""
-    result = await _parse_json_body(request, config.limits.max_body_size)
+    """Common logic for proxied requests.
+
+    Args:
+        request: The FastAPI request.
+        config: Application configuration.
+        logger: Logger for request/response tracking.
+        endpoint: The endpoint path (e.g., "/v1/messages" or "/v1/messages/count_tokens").
+
+    Returns:
+        Response or StreamingResponse from the upstream provider.
+    """
+    result = await _parse_json_body(request, config.max_body_size)
     if isinstance(result, Response):
         return result
     body, headers = result
 
     routing_service = request.app.state.routing_service
-    prepared = routing_service.prepare_messages(body, headers)
-    upstream = request.app.state.upstream_client
+    if endpoint == "/v1/messages":
+        route_name, target_url, upstream_headers, prepared_body = routing_service.prepare_messages(
+            body, headers
+        )
+    else:
+        route_name, target_url, upstream_headers, prepared_body = routing_service.prepare_count_tokens(
+            body, headers
+        )
 
-    return await upstream.proxy_messages(
-        prepared.body,
-        prepared.headers,
-        prepared.target_url,
-        logger,
-        prepared.route_name,
+    upstream = request.app.state.upstream_client
+    return await upstream.proxy_request(
+        prepared_body, upstream_headers, target_url, logger, route_name, endpoint
     )
+
+
+async def handle_messages(
+    request: Request,
+    config: Config,
+    logger: RequestLogger,
+) -> Response | StreamingResponse:
+    """Handle /v1/messages endpoint."""
+    return await _handle_proxy_request(request, config, logger, "/v1/messages")
 
 
 async def handle_count_tokens(
@@ -69,23 +92,8 @@ async def handle_count_tokens(
     config: Config,
     logger: RequestLogger,
 ) -> Response:
-    """Handle /v1/messages/count_tokens with routing logic."""
-    result = await _parse_json_body(request, config.limits.max_body_size)
-    if isinstance(result, Response):
-        return result
-    body, headers = result
-
-    routing_service = request.app.state.routing_service
-    prepared = routing_service.prepare_count_tokens(body, headers)
-    upstream = request.app.state.upstream_client
-
-    return await upstream.proxy_count_tokens(
-        prepared.body,
-        prepared.headers,
-        prepared.target_url,
-        logger,
-        prepared.route_name,
-    )
+    """Handle /v1/messages/count_tokens endpoint."""
+    return await _handle_proxy_request(request, config, logger, "/v1/messages/count_tokens")
 
 
 async def handle_event_logging_batch(

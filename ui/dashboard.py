@@ -17,14 +17,17 @@ from ui.log_utils import extract_request_info, write_anthropic_log, write_cli_lo
 console = Console()
 
 
+def _truncate(text: str, max_len: int, suffix: str = "...") -> str:
+    """Truncate text to max_len, adding suffix if truncated."""
+    return text[:max_len] + suffix if len(text) > max_len else text
+
+
 class RequestInfo:
     """Info about a single request."""
 
-    def __init__(self, model: str, prompt: str, tools: list[str], timestamp: datetime):
+    def __init__(self, model: str, prompt: str, timestamp: datetime):
         self.model = model
-        self.prompt = prompt[:60] + "..." if len(prompt) > 60 else prompt
-        self.tools = tools[:4]  # Keep first 4 tools
-        self.tools_count = len(tools)
+        self.prompt = _truncate(prompt, 60)
         self.timestamp = timestamp
 
 
@@ -68,22 +71,19 @@ class Dashboard:
         """Log a request routed to Anthropic (main session)."""
         # Always write logs
         write_anthropic_log(model, body, streaming, path=path)
-        prompt, tools = extract_request_info(body)
-        prompt_preview = prompt[:200] if prompt else ""
-        write_cli_log("ANTHROPIC", prompt_preview, model=model)
-
-        # Skip dashboard update for count_tokens and haiku models
-        if path == "/v1/messages/count_tokens" or "haiku" in model.lower():
-            with self._lock:
-                self._request_count["anthropic"] += 1
-            return
+        prompt, _ = extract_request_info(body)
+        write_cli_log("ANTHROPIC", _truncate(prompt, 200) if prompt else "", model=model)
 
         with self._lock:
             self._request_count["anthropic"] += 1
+
+            # Skip dashboard update for count_tokens and haiku models
+            if path == "/v1/messages/count_tokens" or "haiku" in model.lower():
+                return
+
             self._main_session = RequestInfo(
                 model=model + (" (stream)" if streaming else ""),
                 prompt=prompt,
-                tools=tools,
                 timestamp=datetime.now(),
             )
             self._refresh()
@@ -98,32 +98,29 @@ class Dashboard:
         session_body: dict[str, Any] | None = None,
     ) -> None:
         """Log a request routed to z.ai (subagent)."""
+        prompt, _ = extract_request_info(body)
+        write_zai_log(body, headers, path=path, session_body=session_body)
+        write_cli_log("ZAI", _truncate(prompt, 200) if prompt else "", model=model)
+
         with self._lock:
             self._request_count["zai"] += 1
-            prompt, tools = extract_request_info(body)
             info = RequestInfo(
                 model=model,
                 prompt=prompt,
-                tools=tools,
                 timestamp=datetime.now(),
             )
             self._subagents.insert(0, info)
             self._subagents = self._subagents[: self._max_subagents]
-
-            write_zai_log(body, headers, path=path, session_body=session_body)
-            prompt_preview = prompt[:200] if prompt else ""
-            write_cli_log("ZAI", prompt_preview, model=model)
-
             self._refresh()
 
     def log_error(self, route: str, status: int, message: str) -> None:
         """Log an error."""
         with self._lock:
-            truncated = message[:50] + "..." if len(message) > 50 else message
+            truncated = _truncate(message, 50)
             self._errors.insert(0, f"{route} {status}: {truncated}")
             self._errors = self._errors[:3]
             self._refresh()
-            write_cli_log("ERROR", message[:200], route=route, status=status)
+            write_cli_log("ERROR", _truncate(message, 200), route=route, status=status)
 
     def _refresh(self) -> None:
         """Refresh the display."""
@@ -168,7 +165,7 @@ class Dashboard:
         stats.append("  |  ")
         stats.append(f"z.ai: {self._request_count['zai']}", style="magenta")
         stats.append("  |  ")
-        stats.append(f"Port: {self.config.proxy.port}", style="dim")
+        stats.append(f"Port: {self.config.port}", style="dim")
 
         return Panel(stats, style="cyan")
 
@@ -220,7 +217,7 @@ class Dashboard:
             content = error_text
         else:
             content = Text(
-                f"Set ANTHROPIC_BASE_URL=http://localhost:{self.config.proxy.port} to use",
+                f"Set ANTHROPIC_BASE_URL=http://localhost:{self.config.port} to use",
                 style="dim",
             )
 

@@ -36,7 +36,7 @@ def main():
             return
 
     # Validate z.ai API key (required for all server modes)
-    if not config.zai.api_key:
+    if not config.zai_api_key:
         console.print("[red][ERROR][/red] z.ai API key not configured!")
         console.print(f"[dim]Edit {CONFIG_FILE} and set zai.api_key[/dim]")
         sys.exit(1)
@@ -55,13 +55,13 @@ def main():
 
     # Run with dashboard
     uvicorn_config = uvicorn.Config(
-        app, host="0.0.0.0", port=config.proxy.port, log_level="warning"
+        app, host="0.0.0.0", port=config.port, log_level="warning"
     )
     server = uvicorn.Server(uvicorn_config)
 
     dashboard.start()
     start_time = datetime.now()
-    write_cli_log("STARTUP", "Proxy started", port=config.proxy.port)
+    write_cli_log("STARTUP", "Proxy started", port=config.port)
     try:
         server.run()
     finally:

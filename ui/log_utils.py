@@ -46,8 +46,6 @@ def write_incoming_log(
     path: str,
     headers: dict[str, str],
     body: Any,
-    *,
-    log_root: Path = LOG_ROOT,
 ) -> Path:
     """Write a single incoming request log entry."""
     payload = {
@@ -57,7 +55,9 @@ def write_incoming_log(
         "headers": _redact_headers(headers),
         "body": body,
     }
-    return _write_json(_session_folder(log_root / "incoming", body), payload)
+    session_id = _extract_session_id(body)
+    folder = LOG_ROOT / "incoming" / session_id if session_id else LOG_ROOT / "incoming"
+    return _write_json(folder, payload)
 
 
 def write_zai_log(
@@ -66,7 +66,6 @@ def write_zai_log(
     *,
     path: str,
     session_body: dict[str, Any] | None = None,
-    log_root: Path = LOG_ROOT,
 ) -> Path:
     """Write a single z.ai request log entry."""
     payload = {
@@ -78,7 +77,9 @@ def write_zai_log(
     }
     # Use session_body (original with metadata) for folder extraction if provided
     folder_body = session_body if session_body else body
-    return _write_json(_session_folder(log_root / "zai", folder_body), payload)
+    session_id = _extract_session_id(folder_body)
+    folder = LOG_ROOT / "zai" / session_id if session_id else LOG_ROOT / "zai"
+    return _write_json(folder, payload)
 
 
 def write_anthropic_log(
@@ -87,10 +88,10 @@ def write_anthropic_log(
     streaming: bool,
     *,
     path: str,
-    log_root: Path = LOG_ROOT,
 ) -> Path:
     """Write a single Anthropic request log entry."""
-    folder = _session_folder(log_root / "anthropic", body)
+    session_id = _extract_session_id(body)
+    folder = LOG_ROOT / "anthropic" / session_id if session_id else LOG_ROOT / "anthropic"
 
     # Cleanup old logs in session folder (keep only latest)
     _cleanup_session_folder(folder)
@@ -152,26 +153,14 @@ def _write_json(folder: Path, payload: dict[str, Any]) -> Path:
     return file_path
 
 
-def _session_folder(base: Path, body: Any) -> Path:
-    session_id = _extract_session_id(body)
-    if session_id:
-        return base / session_id
-    return base
-
-
 def _extract_session_id(body: Any) -> str | None:
+    """Extract session_id from request body metadata.user_id."""
     if not isinstance(body, dict):
         return None
-    metadata = body.get("metadata")
-    if not isinstance(metadata, dict):
+    user_id = body.get("metadata", {}).get("user_id", "")
+    if not isinstance(user_id, str) or "session_" not in user_id:
         return None
-    user_id = metadata.get("user_id")
-    if not isinstance(user_id, str):
-        return None
-    marker = "session_"
-    if marker not in user_id:
-        return None
-    session_id = user_id.split(marker, 1)[-1]
+    session_id = user_id.split("session_", 1)[-1]
     return session_id or None
 
 def _redact_headers(headers: dict[str, str]) -> dict[str, str]:

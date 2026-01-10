@@ -21,17 +21,17 @@ def create_app(config: Config, logger: RequestLogger) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         limits = httpx.Limits(
-            max_connections=config.limits.max_connections,
-            max_keepalive_connections=config.limits.max_keepalive,
+            max_connections=config.max_connections,
+            max_keepalive_connections=config.max_keepalive,
         )
         anthropic_client = httpx.AsyncClient(
-            base_url=config.anthropic.base_url,
-            timeout=config.limits.timeout,
+            base_url=config.anthropic_base_url,
+            timeout=config.timeout,
             limits=limits,
         )
         zai_client = httpx.AsyncClient(
-            base_url=config.zai.base_url,
-            timeout=config.limits.timeout,
+            base_url=config.zai_base_url,
+            timeout=config.timeout,
             limits=limits,
         )
         app.state.upstream_client = UpstreamClient(anthropic_client, zai_client)
@@ -39,8 +39,8 @@ def create_app(config: Config, logger: RequestLogger) -> FastAPI:
             config=config,
             logger=logger,
             decider=RouteDecider(
-                config.routing.subagent_markers,
-                config.routing.anthropic_markers,
+                config.subagent_markers,
+                config.anthropic_markers,
             ),
             transformer=RequestTransformer(),
             sanitizer=RequestSanitizer(),

@@ -45,9 +45,9 @@ pyright
 ### Key Modules
 - **Entry points**: `cli.py` (CLI + dashboard), `app.py` (FastAPI factory), `auth.py` (OAuth helper)
 - **core/router.py**: Pattern matching logic for subagent detection
-- **core/config.py**: Pydantic configuration models
-- **services/routing_service.py**: Request preparation orchestration
-- **services/targets.py**: Upstream target configurations
+- **core/config.py**: Flat Pydantic config (loaded from nested TOML)
+- **services/routing_service.py**: Request routing and preparation (includes target-specific logic)
+- **services/upstream.py**: HTTP proxy with streaming support
 - **ui/dashboard.py**: Real-time CLI dashboard with Rich
 
 ### Routing Logic
