@@ -28,7 +28,41 @@ anthropic_markers = [
 ]
 
 [limits]
-max_body_size = 52428800  # 50MB
-timeout = 300.0           # 5 minutes
+max_body_size = 52428800    # 50MB
+timeout = 300.0             # 5 minutes
 max_connections = 100
 max_keepalive = 20
+subagent_tool_warning = 30  # Warn subagents after N tool uses (0 to disable)
+token_count_timeout = 60.0  # Timeout for /v1/messages/count_tokens endpoint (seconds)
+message_timeout = 300.0     # Timeout for /v1/messages endpoint (seconds)
+
+[sanitize]
+# Tools to hide from main session (subagents use Task tool instead)
+hidden_tools = [
+    # File operations - delegated to subagents
+    "Edit",
+    "Glob",
+    "Grep",
+    # Command execution - delegated to subagents
+    "Bash",
+    "KillShell",
+    # Skills - main session uses Task tool
+    "Skill",
+    # Unused tools
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+]
+
+# Markers that identify subagents which DON'T need CLAUDE.md context
+# If any marker is found in the system prompt, CLAUDE.md reminder is stripped
+# Pattern: "## How You Work: Assess First, Then X" where X identifies the agent type
+strip_claude_md_markers = [
+    # Built-in Claude agents (Bash, etc.)
+    "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+    # Lightweight agents that don't need project context
+    "Assess First, Then Search",     # codebase-explorer
+    "Assess First, Then Lookup",     # context7-docs
+    "Assess First, Then Research",   # web-research
+    "Assess First, Then Automate",   # chrome-devtools
+]

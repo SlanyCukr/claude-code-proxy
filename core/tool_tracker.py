@@ -1,6 +1,5 @@
 """Track subagent tool usage and inject warnings when threshold exceeded."""
 
-import copy
 from typing import Any
 
 
@@ -65,7 +64,10 @@ def inject_tool_limit_reminder(
     # Find last user message
     for i in range(len(messages) - 1, -1, -1):
         if messages[i].get("role") == "user":
-            body = copy.deepcopy(body)
+            # Create selective shallow copies instead of deepcopy
+            body = body.copy()  # shallow copy top-level
+            body["messages"] = list(body["messages"])  # copy the list
+            body["messages"][i] = dict(body["messages"][i])  # copy only the message being modified
             msg = body["messages"][i]
             content = msg.get("content")
 

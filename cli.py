@@ -6,7 +6,7 @@ from datetime import datetime
 from rich.console import Console
 
 from app import create_app
-from auth import TOKENS_FILE, check_auth, load_tokens
+from auth import TOKENS_FILE, load_tokens, print_auth_status
 from core.config import CONFIG_FILE, load_config
 from ui.dashboard import Dashboard
 from ui.log_utils import write_cli_log
@@ -23,7 +23,7 @@ def main():
         arg = sys.argv[1]
 
         if arg in ("--check", "--auth"):
-            check_auth()
+            print_auth_status()
             return
 
         if arg == "--config":
@@ -36,7 +36,7 @@ def main():
             return
 
     # Validate z.ai API key (required for all server modes)
-    if not config.zai_api_key:
+    if not config.zai.api_key:
         console.print("[red][ERROR][/red] z.ai API key not configured!")
         console.print(f"[dim]Edit {CONFIG_FILE} and set zai.api_key[/dim]")
         sys.exit(1)
@@ -55,13 +55,13 @@ def main():
 
     # Run with dashboard
     uvicorn_config = uvicorn.Config(
-        app, host="0.0.0.0", port=config.port, log_level="warning"
+        app, host="0.0.0.0", port=config.proxy.port, log_level="warning"
     )
     server = uvicorn.Server(uvicorn_config)
 
     dashboard.start()
     start_time = datetime.now()
-    write_cli_log("STARTUP", "Proxy started", port=config.port)
+    write_cli_log("STARTUP", "Proxy started", port=config.proxy.port)
     try:
         server.run()
     finally:

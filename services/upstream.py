@@ -7,7 +7,26 @@ from fastapi import Response
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-from core.protocols import RequestLogger
+from core.config import Config
+from core.exceptions import UpstreamConnectionError, UpstreamTimeoutError
+from ui.dashboard import Dashboard
+
+
+def _build_response(response: httpx.Response) -> Response:
+    """Build a FastAPI Response from an httpx Response.
+
+    Args:
+        response: The httpx Response to convert.
+
+    Returns:
+        A FastAPI Response with status, content, and media type from the
+        httpx Response.
+    """
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get("content-type", "application/json"),
+    )
 
 
 class UpstreamClient:
@@ -17,26 +36,20 @@ class UpstreamClient:
         self,
         anthropic_client: httpx.AsyncClient,
         zai_client: httpx.AsyncClient,
+        config: Config,
     ) -> None:
         self._clients = {
             "Anthropic": anthropic_client,
             "z.ai": zai_client,
         }
-
-    def _error_response(self, status: int, message: str) -> Response:
-        """Create a standardized error response."""
-        return Response(
-            content=f'{{"error": "{message}"}}',
-            status_code=status,
-            media_type="application/json",
-        )
+        self._config = config
 
     async def proxy_request(
         self,
         body: dict[str, Any],
         headers: dict[str, str],
         target_url: str,
-        logger: RequestLogger,
+        logger: Dashboard,
         route_name: str,
         endpoint: str = "/v1/messages",
     ) -> Response | StreamingResponse:
@@ -52,19 +65,19 @@ class UpstreamClient:
 
         Returns:
             Response or StreamingResponse from upstream.
+
+        Raises:
+            UpstreamTimeoutError: If the upstream request times out.
+            UpstreamConnectionError: If connection to upstream fails.
         """
-        client = self._client_for(route_name)
-
-        # Handle /v1/messages/count_tokens endpoint
-        if endpoint == "/v1/messages/count_tokens":
-            return await self._count_tokens_request(
-                client, body, headers, target_url, logger, route_name
-            )
-
-        # Handle /v1/messages endpoint (streaming or non-streaming)
+        client = self._clients[route_name]
         is_streaming = body.get("stream", False)
 
         try:
+            if endpoint == "/v1/messages/count_tokens":
+                return await self._count_tokens_request(
+                    client, body, headers, target_url, logger, route_name
+                )
             if is_streaming:
                 return await self._streaming_request(
                     client, body, headers, target_url, logger, route_name
@@ -72,12 +85,21 @@ class UpstreamClient:
             return await self._non_streaming_request(
                 client, body, headers, target_url, logger, route_name
             )
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
             logger.log_error(route_name, 504, "Upstream timeout")
-            return self._error_response(504, "Upstream timeout")
+            raise UpstreamTimeoutError(
+                f"Timeout connecting to {route_name}", provider=route_name
+            ) from e
+        except httpx.ConnectError as e:
+            logger.log_error(route_name, 502, str(e))
+            raise UpstreamConnectionError(
+                f"Connection error to {route_name}: {e}", provider=route_name
+            ) from e
         except httpx.RequestError as e:
             logger.log_error(route_name, 502, str(e))
-            return self._error_response(502, f"Upstream connection error: {e}")
+            raise UpstreamConnectionError(
+                f"Request error to {route_name}: {e}", provider=route_name
+            ) from e
 
     async def _count_tokens_request(
         self,
@@ -85,29 +107,18 @@ class UpstreamClient:
         body: dict[str, Any],
         headers: dict[str, str],
         target_url: str,
-        logger: RequestLogger,
+        logger: Dashboard,
         route_name: str,
     ) -> Response:
         """Handle /v1/messages/count_tokens request."""
-        try:
-            response = await client.post(
-                f"{target_url}/v1/messages/count_tokens",
-                json=body,
-                headers=headers,
-                timeout=60.0,
-            )
-            self._log_non_200(response, logger, route_name)
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                media_type=response.headers.get("content-type", "application/json"),
-            )
-        except httpx.TimeoutException:
-            logger.log_error(route_name, 504, "Upstream timeout")
-            return self._error_response(504, "Upstream timeout")
-        except httpx.RequestError as e:
-            logger.log_error(route_name, 502, str(e))
-            return self._error_response(502, f"Upstream connection error: {e}")
+        response = await client.post(
+            f"{target_url}/v1/messages/count_tokens",
+            json=body,
+            headers=headers,
+            timeout=self._config.limits.token_count_timeout,
+        )
+        self._log_non_200(response, logger, route_name)
+        return _build_response(response)
 
     async def _streaming_request(
         self,
@@ -115,16 +126,26 @@ class UpstreamClient:
         body: dict[str, Any],
         headers: dict[str, str],
         target_url: str,
-        logger: RequestLogger,
+        logger: Dashboard,
         route_name: str,
     ) -> Response | StreamingResponse:
-        """Handle streaming request with proper status code propagation."""
+        """Handle streaming request with proper status code propagation.
+
+        Returns:
+            Response for non-200 status codes (e.g., 400 from Anthropic),
+            or StreamingResponse for successful streaming requests.
+
+        Raises:
+            httpx.TimeoutException: If the upstream request times out.
+            httpx.ConnectError: If connection to upstream fails.
+            httpx.RequestError: If the request fails for other reasons.
+        """
         req = client.build_request(
             "POST",
             f"{target_url}/v1/messages",
             json=body,
             headers=headers,
-            timeout=300.0,
+            timeout=self._config.limits.message_timeout,
         )
         response = await client.send(req, stream=True)
 
@@ -132,11 +153,15 @@ class UpstreamClient:
             error_body = await response.aread()
             logger.log_error(route_name, response.status_code, error_body.decode())
             await response.aclose()
-            return Response(
-                content=error_body,
+            # Return error response for non-200 status codes
+            # (e.g., 400 from Anthropic for invalid requests)
+            error_response = httpx.Response(
                 status_code=response.status_code,
-                media_type=response.headers.get("content-type", "application/json"),
+                content=error_body,
+                headers=response.headers,
+                request=response.request,
             )
+            return _build_response(error_response)
 
         return StreamingResponse(
             response.aiter_bytes(),
@@ -155,30 +180,28 @@ class UpstreamClient:
         body: dict[str, Any],
         headers: dict[str, str],
         target_url: str,
-        logger: RequestLogger,
+        logger: Dashboard,
         route_name: str,
     ) -> Response:
-        """Handle non-streaming request."""
+        """Handle non-streaming request.
+
+        Raises:
+            httpx.TimeoutException: If the upstream request times out.
+            httpx.ConnectError: If connection to upstream fails.
+            httpx.RequestError: If the request fails for other reasons.
+        """
         response = await client.post(
             f"{target_url}/v1/messages",
             json=body,
             headers=headers,
-            timeout=300.0,
+            timeout=self._config.limits.message_timeout,
         )
         self._log_non_200(response, logger, route_name)
-        return Response(
-            content=response.content,
-            status_code=response.status_code,
-            media_type=response.headers.get("content-type", "application/json"),
-        )
+        return _build_response(response)
 
     def _log_non_200(
-        self, response: httpx.Response, logger: RequestLogger, route_name: str
+        self, response: httpx.Response, logger: Dashboard, route_name: str
     ) -> None:
         """Log error if response status code is not 200."""
         if response.status_code != 200:
             logger.log_error(route_name, response.status_code, response.text)
-
-    def _client_for(self, route_name: str) -> httpx.AsyncClient:
-        """Select the appropriate cached client."""
-        return self._clients.get(route_name, self._clients["Anthropic"])

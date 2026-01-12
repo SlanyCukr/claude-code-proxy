@@ -25,39 +25,72 @@ uv run python cli.py --check
 # Show config locations
 uv run python cli.py --config
 
-# After installing: claude-code-proxy, claude-code-proxy-check
-
 # Linting and type checking
-ruff check .
-pyright
+uvx ruff check .
+uvx pyright
 ```
 
 ## Architecture
 
 ### Request Flow
 1. FastAPI handler receives request (`api/handlers.py`)
-2. `routing_service.prepare_messages()` processes request
+2. `RoutingService.prepare_messages()` processes request
 3. `RouteDecider` (`core/router.py`) analyzes system prompt to determine route
-4. Request transformed/sanitized for target provider
+4. Request sanitized via `core/sanitize/` package
 5. `UpstreamClient` (`services/upstream.py`) proxies to Anthropic or z.ai
 6. Response streamed back; activity logged to `logs/`
 
 ### Key Modules
 - **Entry points**: `cli.py` (CLI + dashboard), `app.py` (FastAPI factory), `auth.py` (OAuth helper)
 - **core/router.py**: Pattern matching logic for subagent detection
-- **core/config.py**: Flat Pydantic config (loaded from nested TOML)
-- **services/routing_service.py**: Request routing and preparation (includes target-specific logic)
+- **core/config.py**: Configuration using pydantic-settings with nested TOML models
+- **core/sanitize/**: Request sanitization package (tools, reminders, system prompts)
+- **core/headers.py**: Header building functions for upstream requests
+- **services/routing_service.py**: Request routing and preparation
 - **services/upstream.py**: HTTP proxy with streaming support
 - **ui/dashboard.py**: Real-time CLI dashboard with Rich
 
+### Sanitization Package (`core/sanitize/`)
+Modular request sanitization:
+- `patterns.py` - Shared regex patterns and constants
+- `tools.py` - Tool stripping (remove unwanted tools from requests)
+- `task_tool.py` - Task tool description filtering
+- `reminders.py` - System reminder transformations
+- `system_prompt.py` - System prompt replacement
+
 ### Routing Logic
-Subagent detection uses markers and regex patterns in `core/router.py`:
-- `SUBAGENT_PATTERNS`: Patterns like `<role>`, Agent headers, READ-ONLY MODE
-- `AIR_MODEL_PATTERNS`: Simple tasks routed to cheaper `glm-4.5-air` model
+Subagent detection uses markers in `core/router.py`:
+- Configurable `subagent_markers` in config.toml
+- Configurable `anthropic_markers` for exclusions
 
 ### Configuration
-- **Config**: `config.toml` in repo root (copy from `config.example.toml`, set z.ai API key)
-- **Tokens**: OAuth tokens from `~/.claude/.credentials.json`
+Uses pydantic-settings with nested TOML structure. **All values are required** (no defaults):
+- **Config file**: `config.toml` in repo root (copy from `config.example.toml`)
+- **OAuth tokens**: Read from `~/.claude/.credentials.json`
+
+```toml
+[proxy]
+port = 8080
+debug = true
+
+[anthropic]
+base_url = "https://api.anthropic.com"
+
+[zai]
+base_url = "https://api.z.ai/api/anthropic"
+api_key = "your-key"
+
+[routing]
+subagent_markers = ["..."]
+anthropic_markers = ["..."]
+
+[limits]
+max_body_size = 52428800
+timeout = 300.0
+max_connections = 100
+max_keepalive = 20
+subagent_tool_warning = 30
+```
 
 ### Logging
 Runtime logs written to `logs/` with subfolders: `incoming/`, `zai/`, `anthropic/`
@@ -66,6 +99,8 @@ Runtime logs written to `logs/` with subfolders: `incoming/`, `zai/`, `anthropic
 - Python 3.11+, 4-space indentation
 - `snake_case` for functions/variables, `PascalCase` for classes
 - Ruff and pyright configured in `pyproject.toml`
+- Use functions over classes for stateless operations
+- Prefer in-place modifications with single deep copy at entry
 
 ## Testing
 No tests yet. If adding tests, use `pytest` with `test_*.py` naming under a `tests/` directory.

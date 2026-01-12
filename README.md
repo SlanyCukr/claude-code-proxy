@@ -21,7 +21,7 @@ Detection is automatic via system prompt patterns.
    cp config.example.toml config.toml
    ```
 
-2. **Set your z.ai API key** in `config.toml`
+2. **Set your z.ai API key** in `config.toml` (required)
 
 3. **Run the proxy:**
    ```bash
@@ -35,17 +35,22 @@ Detection is automatic via system prompt patterns.
 
 ## Configuration
 
-All settings in `config.toml`:
+All settings in `config.toml` are **required** (no defaults). Uses pydantic-settings with nested TOML:
 
-| Section | Key | Default | Description |
-|---------|-----|---------|-------------|
-| `proxy` | `port` | 8080 | Listen port |
-| `proxy` | `debug` | true | Debug logging |
-| `zai` | `api_key` | - | Your z.ai API key (required) |
-| `zai` | `base_url` | api.z.ai/... | z.ai endpoint |
-| `anthropic` | `base_url` | api.anthropic.com | Anthropic endpoint |
-| `limits` | `timeout` | 300.0 | Request timeout (seconds) |
-| `limits` | `max_body_size` | 50MB | Max request body |
+| Section | Key | Description |
+|---------|-----|-------------|
+| `proxy` | `port` | Listen port |
+| `proxy` | `debug` | Debug logging |
+| `zai` | `api_key` | Your z.ai API key |
+| `zai` | `base_url` | z.ai endpoint |
+| `anthropic` | `base_url` | Anthropic endpoint |
+| `routing` | `subagent_markers` | Patterns identifying subagents |
+| `routing` | `anthropic_markers` | Patterns forcing Anthropic |
+| `limits` | `timeout` | Request timeout (seconds) |
+| `limits` | `max_body_size` | Max request body (bytes) |
+| `limits` | `max_connections` | Max HTTP connections |
+| `limits` | `max_keepalive` | Max keepalive connections |
+| `limits` | `subagent_tool_warning` | Warn after N tool uses (0 to disable) |
 
 ## Commands
 
@@ -58,7 +63,7 @@ uv run python cli.py --config  # Show config path
 ## Architecture
 
 ```
-Request → FastAPI Handler → Route Decider → Upstream Client → Response
+Request → FastAPI Handler → Route Decider → Sanitize → Upstream Client → Response
                                 ↓
                       Subagent? → z.ai
                       Main?     → Anthropic
@@ -67,15 +72,16 @@ Request → FastAPI Handler → Route Decider → Upstream Client → Response
 **Key modules:**
 - `cli.py` - Entry point with Rich dashboard
 - `core/router.py` - Subagent detection logic
-- `core/config.py` - TOML config loading
+- `core/config.py` - pydantic-settings TOML config
+- `core/sanitize/` - Request sanitization package
 - `services/upstream.py` - HTTP proxying
 
 ## Development
 
 ```bash
-uv sync          # Install dependencies
-ruff check .     # Lint
-pyright          # Type check
+uv sync            # Install dependencies
+uvx ruff check .   # Lint
+uvx pyright        # Type check
 ```
 
 ## License

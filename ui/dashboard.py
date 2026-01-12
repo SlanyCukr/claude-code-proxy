@@ -46,13 +46,14 @@ class Dashboard:
 
     def start(self) -> "Dashboard":
         """Start the live dashboard."""
-        self._live = Live(
+        live = Live(
             self._build_layout(),
             console=console,
             refresh_per_second=4,
             screen=False,
         )
-        self._live.start()
+        live.start()
+        self._live = live
         return self
 
     def stop(self) -> None:
@@ -165,7 +166,7 @@ class Dashboard:
         stats.append("  |  ")
         stats.append(f"z.ai: {self._request_count['zai']}", style="magenta")
         stats.append("  |  ")
-        stats.append(f"Port: {self.config.port}", style="dim")
+        stats.append(f"Port: {self.config.proxy.port}", style="dim")
 
         return Panel(stats, style="cyan")
 
@@ -217,7 +218,7 @@ class Dashboard:
             content = error_text
         else:
             content = Text(
-                f"Set ANTHROPIC_BASE_URL=http://localhost:{self.config.port} to use",
+                f"Set ANTHROPIC_BASE_URL=http://localhost:{self.config.proxy.port} to use",
                 style="dim",
             )
 

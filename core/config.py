@@ -1,9 +1,14 @@
-"""Configuration models and loading."""
+"""Configuration models and loading using pydantic-settings."""
 
-import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 # User data directory (for OAuth tokens)
 CONFIG_DIR = Path.home() / ".config" / "claude-code-proxy"
@@ -13,58 +18,89 @@ CONFIG_FILE = Path(__file__).parent.parent / "config.toml"
 CONFIG_EXAMPLE = Path(__file__).parent.parent / "config.example.toml"
 
 
-class Config(BaseModel):
-    """Flattened configuration model."""
+class ProxyConfig(BaseModel):
+    """Proxy server settings."""
 
-    # Proxy settings
-    port: int = 8080
-    debug: bool = True
+    port: int
+    debug: bool
 
-    # Anthropic settings
-    anthropic_base_url: str = "https://api.anthropic.com"
 
-    # z.ai settings
-    zai_base_url: str = "https://api.z.ai/api/anthropic"
-    zai_api_key: str = ""
+class AnthropicConfig(BaseModel):
+    """Anthropic API settings."""
 
-    # Routing settings
-    subagent_markers: list[str] = Field(
-        default_factory=lambda: ["You are a Claude agent, built on Anthropic's Claude Agent SDK."]
+    base_url: str
+
+
+class ZaiConfig(BaseModel):
+    """z.ai API settings."""
+
+    base_url: str
+    api_key: str
+
+
+class RoutingConfig(BaseModel):
+    """Request routing settings."""
+
+    subagent_markers: list[str]
+    anthropic_markers: list[str]
+
+
+class LimitsConfig(BaseModel):
+    """Request limits settings."""
+
+    max_body_size: int
+    timeout: float
+    max_connections: int
+    max_keepalive: int
+    subagent_tool_warning: int
+    token_count_timeout: float
+    message_timeout: float
+
+
+class SanitizeConfig(BaseModel):
+    """Request sanitization settings."""
+
+    hidden_tools: list[str]
+    strip_claude_md_markers: list[str]
+
+
+class Config(BaseSettings):
+    """Application configuration loaded from TOML file. All values required."""
+
+    model_config = SettingsConfigDict(
+        toml_file=str(CONFIG_FILE),
+        extra="forbid",
     )
-    anthropic_markers: list[str] = Field(default_factory=list)
 
-    # Limits settings
-    max_body_size: int = 50 * 1024 * 1024  # 50MB
-    timeout: float = 300.0  # 5 minutes
-    max_connections: int = 100
-    max_keepalive: int = 20
-    subagent_tool_warning: int = 30  # Warn subagents after N tool uses (0 to disable)
+    proxy: ProxyConfig
+    anthropic: AnthropicConfig
+    zai: ZaiConfig
+    routing: RoutingConfig
+    limits: LimitsConfig
+    sanitize: SanitizeConfig
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Only load from TOML file, ignore environment variables."""
+        return (TomlConfigSettingsSource(settings_cls),)
 
 
 def load_config() -> Config:
-    """Load config from TOML. Exit with message if missing."""
+    """Load config from TOML file. All values must be present."""
     if not CONFIG_FILE.exists():
         raise SystemExit(
             f"Config not found: {CONFIG_FILE}\n"
-            f"Copy {CONFIG_EXAMPLE.name} to {CONFIG_FILE.name} and set your API key."
+            f"Copy {CONFIG_EXAMPLE.name} to {CONFIG_FILE.name} and configure all values."
         )
 
-    with CONFIG_FILE.open("rb") as f:
-        data = tomllib.load(f)
-
-    # Flatten nested structure from TOML
-    flat = {
-        "port": data.get("proxy", {}).get("port", 8080),
-        "debug": data.get("proxy", {}).get("debug", True),
-        "anthropic_base_url": data.get("anthropic", {}).get("base_url", "https://api.anthropic.com"),
-        "zai_base_url": data.get("zai", {}).get("base_url", "https://api.z.ai/api/anthropic"),
-        "zai_api_key": data.get("zai", {}).get("api_key", ""),
-        "subagent_markers": data.get("routing", {}).get("subagent_markers", ["You are a Claude agent, built on Anthropic's Claude Agent SDK."]),
-        "anthropic_markers": data.get("routing", {}).get("anthropic_markers", []),
-        "max_body_size": data.get("limits", {}).get("max_body_size", 50 * 1024 * 1024),
-        "timeout": data.get("limits", {}).get("timeout", 300.0),
-        "max_connections": data.get("limits", {}).get("max_connections", 100),
-        "max_keepalive": data.get("limits", {}).get("max_keepalive", 20),
-        "subagent_tool_warning": data.get("limits", {}).get("subagent_tool_warning", 30),
-    }
-    return Config.model_validate(flat)
+    try:
+        return Config()  # type: ignore[call-arg]  # Values loaded from TOML
+    except Exception as e:
+        raise SystemExit(f"Invalid config: {e}") from e

@@ -4,47 +4,40 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.responses import Response
 
 from api.handlers import handle_count_tokens, handle_event_logging_batch, handle_messages
 from core.config import Config
-from core.headers import HeaderBuilder
-from core.protocols import RequestLogger
-from core.router import RouteDecider
-from core.sanitize import RequestSanitizer
-from core.transform import RequestTransformer
+from core.exceptions import InvalidJSON, RequestTooLarge
 from services.routing_service import RoutingService
 from services.upstream import UpstreamClient
+from ui.dashboard import Dashboard
 
 
-def create_app(config: Config, logger: RequestLogger) -> FastAPI:
+def create_app(config: Config, logger: Dashboard) -> FastAPI:
     """Create and configure the FastAPI application."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         limits = httpx.Limits(
-            max_connections=config.max_connections,
-            max_keepalive_connections=config.max_keepalive,
+            max_connections=config.limits.max_connections,
+            max_keepalive_connections=config.limits.max_keepalive,
         )
         anthropic_client = httpx.AsyncClient(
-            base_url=config.anthropic_base_url,
-            timeout=config.timeout,
+            base_url=config.anthropic.base_url,
+            timeout=config.limits.timeout,
             limits=limits,
         )
         zai_client = httpx.AsyncClient(
-            base_url=config.zai_base_url,
-            timeout=config.timeout,
+            base_url=config.zai.base_url,
+            timeout=config.limits.timeout,
             limits=limits,
         )
-        app.state.upstream_client = UpstreamClient(anthropic_client, zai_client)
+        app.state.upstream_client = UpstreamClient(
+            anthropic_client, zai_client, config
+        )
         app.state.routing_service = RoutingService(
             config=config,
             logger=logger,
-            decider=RouteDecider(
-                config.subagent_markers,
-                config.anthropic_markers,
-            ),
-            transformer=RequestTransformer(),
-            sanitizer=RequestSanitizer(),
-            header_builder=HeaderBuilder(),
         )
         try:
             yield
@@ -53,6 +46,22 @@ def create_app(config: Config, logger: RequestLogger) -> FastAPI:
             await zai_client.aclose()
 
     app = FastAPI(title="Claude Code Proxy", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(RequestTooLarge)
+    async def request_too_large_handler(request: Request, exc: RequestTooLarge) -> Response:
+        return Response(
+            content='{"error": "Request body too large"}',
+            status_code=413,
+            media_type="application/json",
+        )
+
+    @app.exception_handler(InvalidJSON)
+    async def invalid_json_handler(request: Request, exc: InvalidJSON) -> Response:
+        return Response(
+            content=f'{{"error": "{exc}"}}',
+            status_code=400,
+            media_type="application/json",
+        )
 
     @app.post("/v1/messages")
     async def proxy_messages(request: Request):
