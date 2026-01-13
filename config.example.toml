@@ -25,6 +25,8 @@ subagent_markers = [
 anthropic_markers = [
     # Built-in Plan/Design agent - keep visible in main session
     "You are a software architect and planning specialist for Claude Code.",
+    # Web research agent - needs full Anthropic capabilities
+    "Assess First, Then Research",
 ]
 
 [limits]
@@ -39,15 +41,9 @@ message_timeout = 300.0     # Timeout for /v1/messages endpoint (seconds)
 [sanitize]
 # Tools to hide from main session (subagents use Task tool instead)
 hidden_tools = [
-    # File operations - delegated to subagents
-    "Edit",
-    "Glob",
-    "Grep",
     # Command execution - delegated to subagents
     "Bash",
     "KillShell",
-    # Skills - main session uses Task tool
-    "Skill",
     # Unused tools
     "NotebookEdit",
     "WebFetch",
