@@ -27,6 +27,10 @@ anthropic_markers = [
     "You are a software architect and planning specialist for Claude Code.",
     # Web research agent - needs full Anthropic capabilities
     "Assess First, Then Research",
+    # Build agents - route to Anthropic for better code quality
+    "Assess First, Then Act",      # build-agent, python-build-agent, react-nextjs-agent
+    "Assess First, Then Review",   # code-reviewer
+    "Assess First, Then Diagnose", # root-cause-agent
 ]
 
 [limits]

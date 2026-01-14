@@ -130,5 +130,11 @@ NEW_TASK_OPENING = (
     "  - Exact commands if they need to run builds, tests, docker, pre-commit hooks\n"
     "  - Write a context file (e.g., /tmp/task-context.md) and pass its path if context is complex\n"
     "- Don't paste file contents in the prompt - give paths and let agents read them\n"
-    "- If unsure about command structure, verify it in main session first, then pass exact commands to agent"
+    "- If unsure about command structure, verify it in main session first, then pass exact commands to agent\n\n"
+    "**Pass file paths, not descriptions:**\n"
+    "- Files to modify: `src/api/users.py, src/models/user.py`\n"
+    "- Reference code: `src/utils/auth.py (see token handling)`\n"
+    "- Previous agent outputs: `/tmp/zai-speckit/toon/abc123.toon, /tmp/zai-speckit/toon/def456.toon`\n"
+    "- Plan file: `/tmp/plan.md (task 3)`\n"
+    "- Specs/config: `docs/api-spec.md, pyproject.toml`"
 )
