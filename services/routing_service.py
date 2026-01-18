@@ -6,6 +6,7 @@ from core.config import Config
 from core.headers import build_anthropic_headers, build_zai_headers
 from core.router import decide_route
 from core.sanitize import sanitize
+from core.sanitize.bash_description import strip_bash_description_inplace
 from core.sanitize.system_prompt import extract_system_text
 from core.tool_tracker import count_tool_uses, inject_tool_limit_reminder
 from core.transform import strip_anthropic_features
@@ -163,6 +164,7 @@ class RoutingService:
 
         if is_messages:
             body = strip_anthropic_features(body)
+            strip_bash_description_inplace(body)
             threshold = self._config.limits.subagent_tool_warning
             if threshold > 0:
                 tool_count = count_tool_uses(body.get("messages", []))
@@ -170,6 +172,7 @@ class RoutingService:
             self._log_request("zai", model, body, path, is_messages, session_body=original_body)
         else:
             body = strip_anthropic_features(body)
+            strip_bash_description_inplace(body)
             self._log_request("zai", model, body, path, is_messages)
 
         upstream_headers = build_zai_headers(headers, self._config.zai.api_key)

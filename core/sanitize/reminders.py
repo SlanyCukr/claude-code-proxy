@@ -6,6 +6,7 @@ from typing import Any
 from .patterns import (
     CLAUDE_MD_REMINDER_PATTERN,
     MALWARE_REMINDER_PATTERN,
+    PLAN_MODE_REMINDER_PATTERN,
     PLAN_MODE_REPLACEMENTS,
     POST_ENV_INFO_PATTERN,
     POST_ENV_REPLACEMENT,
@@ -53,6 +54,11 @@ def _contains_malware_marker(content: Any) -> bool:
 def _strip_malware_reminder(text: str) -> str:
     """Strip malware reminder from text."""
     return MALWARE_REMINDER_PATTERN.sub("", text)
+
+
+def _strip_plan_mode_reminder(text: str) -> str:
+    """Strip plan mode reminder from text."""
+    return PLAN_MODE_REMINDER_PATTERN.sub("", text)
 
 
 def _apply_to_content_blocks(
@@ -136,11 +142,18 @@ def strip_system_reminders_inplace(body: dict[str, Any]) -> None:
     if not isinstance(messages, list):
         return
 
-    if not any(_contains_malware_marker(msg.get("content")) for msg in messages):
+    # Check for markers
+    has_malware = any(_contains_malware_marker(msg.get("content")) for msg in messages)
+    has_plan_mode = any(
+        _content_contains(msg.get("content"), "Plan mode") for msg in messages
+    )
+
+    if not has_malware and not has_plan_mode:
         return
 
-    # Strip from text blocks
-    _apply_to_messages(body, _strip_malware_reminder)
+    if has_malware:
+        # Strip from text blocks
+        _apply_to_messages(body, _strip_malware_reminder)
 
     # Strip from tool_result blocks
     for msg in messages:
@@ -149,7 +162,10 @@ def strip_system_reminders_inplace(body: dict[str, Any]) -> None:
         content = msg.get("content")
         if not isinstance(content, list):
             continue
-        _apply_transform_to_blocks(content, "tool_result", _strip_malware_reminder)
+        if has_malware:
+            _apply_transform_to_blocks(content, "tool_result", _strip_malware_reminder)
+        if has_plan_mode:
+            _apply_transform_to_blocks(content, "tool_result", _strip_plan_mode_reminder)
 
 
 def strip_claude_md_reminder_inplace(body: dict[str, Any]) -> None:

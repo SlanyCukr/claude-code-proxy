@@ -61,6 +61,12 @@ MALWARE_REMINDER_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Plan mode reminder pattern (embedded in tool_result content)
+PLAN_MODE_REMINDER_PATTERN = re.compile(
+    r"\n*<system-reminder>\s*Plan mode (?:is active|still active).*?</system-reminder>\s*",
+    re.DOTALL,
+)
+
 # CLAUDE.md context reminder pattern (injected by Claude Code for all requests)
 CLAUDE_MD_REMINDER_PATTERN = re.compile(
     r"<system-reminder>\s*As you answer the user's questions, you can use the "
