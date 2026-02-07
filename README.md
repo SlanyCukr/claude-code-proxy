@@ -1,89 +1,91 @@
 # Claude Code Proxy
 
-Route Claude Code API requests between providers for cost optimization.
+Smart HTTP proxy that routes Claude Code API requests between Anthropic (main session, OAuth) and z.ai (subagents, API key) - with request sanitization and a real-time dashboard.
 
-## How It Works
+## What It Does
 
-```
-Claude Code  ──►  Proxy  ──┬──►  Anthropic (main session)
-                          └──►  z.ai (subagents)
-```
-
-- **Main session** requests go to Anthropic using Claude Code's OAuth
-- **Subagent** requests (Task tool workers) go to z.ai using API key
-
-Detection is automatic via system prompt patterns.
+- **Routes requests** - Main session goes to Anthropic; Task tool subagents go to z.ai for cost savings
+- **Sanitizes requests** - Strips/rewrites tools, system prompts, reminders, and descriptions to optimize subagent behavior
+- **Real-time dashboard** - Rich CLI dashboard showing live request routing, token usage, and activity
 
 ## Quick Start
 
-1. **Copy config template:**
-   ```bash
-   cp config.example.toml config.toml
-   ```
+### Prerequisites
 
-2. **Set your z.ai API key** in `config.toml` (required)
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) package manager
+- z.ai API key
+- Claude Code with active OAuth session (`~/.claude/.credentials.json`)
 
-3. **Run the proxy:**
-   ```bash
-   uv run python cli.py
-   ```
+### Install
 
-4. **Configure Claude Code:**
-   ```bash
-   claude config set --global apiBaseUrl http://localhost:8080
-   ```
+```bash
+git clone <repo-url>
+cd claude-code-proxy
+uv sync
+```
+
+### Configure
+
+```bash
+cp config.example.toml config.toml
+# Edit config.toml - set your z.ai API key at minimum
+```
+
+See `config.example.toml` for all available settings.
+
+### Run
+
+```bash
+uv run python cli.py
+```
+
+Other commands:
+
+```bash
+uv run python cli.py --check   # Check OAuth auth status
+uv run python cli.py --config  # Show config file locations
+```
+
+## Using with Claude Code
+
+Point Claude Code at the proxy by setting the base URL:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8080
+```
+
+Then use Claude Code normally. The proxy transparently intercepts requests and routes them based on system prompt analysis.
 
 ## Configuration
 
-All settings in `config.toml` are **required** (no defaults). Uses pydantic-settings with nested TOML:
+All configuration lives in `config.toml` (copy from `config.example.toml`). Key sections:
 
-| Section | Key | Description |
-|---------|-----|-------------|
-| `proxy` | `port` | Listen port |
-| `proxy` | `debug` | Debug logging |
-| `zai` | `api_key` | Your z.ai API key |
-| `zai` | `base_url` | z.ai endpoint |
-| `anthropic` | `base_url` | Anthropic endpoint |
-| `routing` | `subagent_markers` | Patterns identifying subagents |
-| `routing` | `anthropic_markers` | Patterns forcing Anthropic |
-| `limits` | `timeout` | Request timeout (seconds) |
-| `limits` | `max_body_size` | Max request body (bytes) |
-| `limits` | `max_connections` | Max HTTP connections |
-| `limits` | `max_keepalive` | Max keepalive connections |
-| `limits` | `subagent_tool_warning` | Warn after N tool uses (0 to disable) |
-
-## Commands
-
-```bash
-uv run python cli.py           # Run with dashboard
-uv run python cli.py --check   # Check auth status
-uv run python cli.py --config  # Show config path
-```
+| Section | Purpose |
+|---------|---------|
+| `[proxy]` | Port, debug mode |
+| `[anthropic]` | Anthropic API base URL |
+| `[zai]` | z.ai base URL and API key |
+| `[routing]` | Subagent detection markers, Anthropic routing markers |
+| `[limits]` | Connection pools, timeouts, tool warning thresholds |
+| `[sanitize]` | Hidden tools, stripped agents, CLAUDE.md stripping markers |
 
 ## Architecture
 
 ```
-Request → FastAPI Handler → Route Decider → Sanitize → Upstream Client → Response
-                                ↓
-                      Subagent? → z.ai
-                      Main?     → Anthropic
+Claude Code  -->  FastAPI proxy  -->  Anthropic (main session, OAuth)
+                      |
+                      +---------->  z.ai (subagents, API key)
 ```
 
-**Key modules:**
-- `cli.py` - Entry point with Rich dashboard
-- `core/router.py` - Subagent detection logic
-- `core/config.py` - pydantic-settings TOML config
-- `core/sanitize/` - Request sanitization package
-- `services/upstream.py` - HTTP proxying
+1. Request arrives at FastAPI handler
+2. `RouteDecider` analyzes system prompt for subagent markers
+3. Request sanitized (tool stripping, prompt replacement, description rewrites)
+4. Proxied upstream with streaming response
+5. Activity logged and displayed on dashboard
 
-## Development
-
-```bash
-uv sync            # Install dependencies
-uvx ruff check .   # Lint
-uvx pyright        # Type check
-```
+For detailed architecture, transforms, and module reference, see [CLAUDE.md](./CLAUDE.md).
 
 ## License
 
-MIT
+[MIT](./LICENSE)

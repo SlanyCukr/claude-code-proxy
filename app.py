@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import json
 from contextlib import asynccontextmanager
 
 import httpx
@@ -8,7 +9,12 @@ from fastapi.responses import Response
 
 from api.handlers import handle_count_tokens, handle_event_logging_batch, handle_messages
 from core.config import Config
-from core.exceptions import InvalidJSON, RequestTooLarge
+from core.exceptions import (
+    InvalidJSON,
+    RequestTooLarge,
+    UpstreamConnectionError,
+    UpstreamTimeoutError,
+)
 from services.routing_service import RoutingService
 from services.upstream import UpstreamClient
 from ui.dashboard import Dashboard
@@ -21,16 +27,23 @@ def create_app(config: Config, logger: Dashboard) -> FastAPI:
         limits = httpx.Limits(
             max_connections=config.limits.max_connections,
             max_keepalive_connections=config.limits.max_keepalive,
+            keepalive_expiry=config.limits.keepalive_expiry,
+        )
+        timeout = httpx.Timeout(
+            connect=config.limits.connect_timeout,
+            read=None,
+            write=30.0,
+            pool=config.limits.pool_timeout,
         )
         anthropic_client = httpx.AsyncClient(
-            base_url=config.anthropic.base_url,
-            timeout=config.limits.timeout,
+            timeout=timeout,
             limits=limits,
+            http2=True,
         )
         zai_client = httpx.AsyncClient(
-            base_url=config.zai.base_url,
-            timeout=config.limits.timeout,
+            timeout=timeout,
             limits=limits,
+            http2=True,
         )
         app.state.upstream_client = UpstreamClient(
             anthropic_client, zai_client, config
@@ -58,8 +71,24 @@ def create_app(config: Config, logger: Dashboard) -> FastAPI:
     @app.exception_handler(InvalidJSON)
     async def invalid_json_handler(request: Request, exc: InvalidJSON) -> Response:
         return Response(
-            content=f'{{"error": "{exc}"}}',
+            content=json.dumps({"error": str(exc)}),
             status_code=400,
+            media_type="application/json",
+        )
+
+    @app.exception_handler(UpstreamTimeoutError)
+    async def upstream_timeout_handler(request: Request, exc: UpstreamTimeoutError) -> Response:
+        return Response(
+            content=json.dumps({"error": str(exc)}),
+            status_code=504,
+            media_type="application/json",
+        )
+
+    @app.exception_handler(UpstreamConnectionError)
+    async def upstream_connection_handler(request: Request, exc: UpstreamConnectionError) -> Response:
+        return Response(
+            content=json.dumps({"error": str(exc)}),
+            status_code=502,
             media_type="application/json",
         )
 

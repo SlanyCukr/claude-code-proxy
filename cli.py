@@ -1,15 +1,16 @@
 """CLI entry point for claude-code-proxy."""
 
+import json
 import sys
 from datetime import datetime
 
 from rich.console import Console
 
 from app import create_app
-from auth import TOKENS_FILE, load_tokens, print_auth_status
+from auth import TOKENS_FILE, TokenRefreshError, load_tokens, print_auth_status
 from core.config import CONFIG_FILE, load_config
 from ui.dashboard import Dashboard
-from ui.log_utils import write_cli_log
+from ui.log_utils import clear_logs, shutdown_log_executor, write_cli_log
 
 console = Console()
 
@@ -42,11 +43,16 @@ def main():
         sys.exit(1)
 
     # Check auth status
-    tokens = load_tokens()
+    try:
+        tokens = load_tokens()
+    except (TokenRefreshError, json.JSONDecodeError) as e:
+        console.print(f"[red][ERROR][/red] {e}")
+        sys.exit(1)
     if not tokens:
         console.print("[yellow]Warning:[/yellow] Not authenticated (run claude /login)")
 
-    # Start dashboard and server
+    # Clear previous logs and start dashboard
+    clear_logs()
     dashboard = Dashboard(config)
 
     import uvicorn
@@ -55,7 +61,11 @@ def main():
 
     # Run with dashboard
     uvicorn_config = uvicorn.Config(
-        app, host="0.0.0.0", port=config.proxy.port, log_level="warning"
+        app,
+        host="127.0.0.1",
+        port=config.proxy.port,
+        log_level="warning",
+        timeout_keep_alive=config.limits.keep_alive_timeout,
     )
     server = uvicorn.Server(uvicorn_config)
 
@@ -67,6 +77,7 @@ def main():
     finally:
         duration = datetime.now() - start_time
         write_cli_log("SHUTDOWN", "Proxy stopped", duration=str(duration))
+        shutdown_log_executor()
         dashboard.stop()
 
 

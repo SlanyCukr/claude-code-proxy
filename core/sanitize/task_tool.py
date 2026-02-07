@@ -3,24 +3,30 @@
 from typing import Any
 
 from .patterns import (
-    AGENT_PATTERNS,
     AGENT_TOOLS_PATTERN,
     BASH_AGENT_NEW_DESC,
     BASH_AGENT_OLD_DESC,
     CONTEXT_PATTERN,
-    DEFAULT_STRIPPED_AGENTS,
     EXAMPLE_PATTERN,
     NEW_TASK_OPENING,
     OLD_OPENING_PATTERN,
+    build_agent_pattern,
 )
 
 
-def filter_task_tool_inplace(body: dict[str, Any]) -> None:
-    """Remove default agent descriptions and unwanted sections from Task tool.
+def filter_task_tool_inplace(
+    body: dict[str, Any],
+    stripped_agents: list[str] | None = None,
+) -> None:
+    """Remove agent descriptions and unwanted sections from Task tool.
 
     Args:
         body: Request body (modified in place).
+        stripped_agents: List of agent names to strip from Task tool description.
     """
+    if stripped_agents is None:
+        stripped_agents = []
+
     tools = body.get("tools")
     if not isinstance(tools, list):
         return
@@ -35,9 +41,10 @@ def filter_task_tool_inplace(body: dict[str, Any]) -> None:
         # Replace opening text
         description = OLD_OPENING_PATTERN.sub(NEW_TASK_OPENING, description)
 
-        # Filter out default agent entries
-        for agent in DEFAULT_STRIPPED_AGENTS:
-            description = AGENT_PATTERNS[agent].sub("", description)
+        # Filter out configured agent entries
+        for agent in stripped_agents:
+            pattern = build_agent_pattern(agent)
+            description = pattern.sub("", description)
 
         # Strip instruction and example sections
         description = CONTEXT_PATTERN.sub("", description)

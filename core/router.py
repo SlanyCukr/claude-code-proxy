@@ -1,14 +1,20 @@
 """Request routing logic - determines Anthropic vs z.ai."""
 
+from typing import Any, Literal
+
 from core.sanitize.system_prompt import extract_system_text
+
+Route = Literal["anthropic", "zai"]
+# (route, is_subagent)
+RouteResult = tuple[Route, bool]
 
 
 def decide_route(
-    body: dict,
+    body: dict[str, Any],
     subagent_markers: list[str],
     anthropic_markers: list[str],
-) -> str:
-    """Return 'anthropic' or 'zai' based on system prompt patterns.
+) -> RouteResult:
+    """Return route and subagent status based on system prompt patterns.
 
     Args:
         body: Request body containing system prompt
@@ -16,16 +22,17 @@ def decide_route(
         anthropic_markers: Markers that force Anthropic routing
 
     Returns:
-        'anthropic' or 'zai'
+        Tuple of (route, is_subagent) where route is 'anthropic' or 'zai'
     """
     system_text = extract_system_text(body.get("system"))
+    is_subagent = any(marker in system_text for marker in subagent_markers)
 
     # Check exclusions first - force Anthropic for specific agents
     if any(marker in system_text for marker in anthropic_markers):
-        return "anthropic"
+        return "anthropic", is_subagent
 
-    # Then check subagent markers
-    if any(marker in system_text for marker in subagent_markers):
-        return "zai"
+    # Route subagents to z.ai
+    if is_subagent:
+        return "zai", True
 
-    return "anthropic"
+    return "anthropic", False

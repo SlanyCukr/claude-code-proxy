@@ -39,6 +39,9 @@ ENV/
 .pyright/
 .mypy_cache/
 
+# Linting
+.ruff_cache/
+
 # Testing
 .pytest_cache/
 .coverage

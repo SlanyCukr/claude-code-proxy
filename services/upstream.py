@@ -9,7 +9,10 @@ from starlette.background import BackgroundTask
 
 from core.config import Config
 from core.exceptions import UpstreamConnectionError, UpstreamTimeoutError
+from core.router import Route
 from ui.dashboard import Dashboard
+
+_DISPLAY_NAMES: dict[Route, str] = {"anthropic": "Anthropic", "zai": "z.ai"}
 
 
 def _build_response(response: httpx.Response) -> Response:
@@ -38,9 +41,9 @@ class UpstreamClient:
         zai_client: httpx.AsyncClient,
         config: Config,
     ) -> None:
-        self._clients = {
-            "Anthropic": anthropic_client,
-            "z.ai": zai_client,
+        self._clients: dict[Route, httpx.AsyncClient] = {
+            "anthropic": anthropic_client,
+            "zai": zai_client,
         }
         self._config = config
 
@@ -50,7 +53,7 @@ class UpstreamClient:
         headers: dict[str, str],
         target_url: str,
         logger: Dashboard,
-        route_name: str,
+        route: Route,
         endpoint: str = "/v1/messages",
     ) -> Response | StreamingResponse:
         """Proxy a request to the upstream provider.
@@ -60,7 +63,7 @@ class UpstreamClient:
             headers: Request headers.
             target_url: Base URL of the target provider.
             logger: Logger for request/response tracking.
-            route_name: Name of the route (for client selection).
+            route: Route key for client selection.
             endpoint: Endpoint path (default: /v1/messages).
 
         Returns:
@@ -70,35 +73,36 @@ class UpstreamClient:
             UpstreamTimeoutError: If the upstream request times out.
             UpstreamConnectionError: If connection to upstream fails.
         """
-        client = self._clients[route_name]
+        client = self._clients[route]
+        display_name = _DISPLAY_NAMES[route]
         is_streaming = body.get("stream", False)
 
         try:
             if endpoint == "/v1/messages/count_tokens":
                 return await self._count_tokens_request(
-                    client, body, headers, target_url, logger, route_name
+                    client, body, headers, target_url, logger, display_name
                 )
             if is_streaming:
                 return await self._streaming_request(
-                    client, body, headers, target_url, logger, route_name
+                    client, body, headers, target_url, logger, display_name
                 )
             return await self._non_streaming_request(
-                client, body, headers, target_url, logger, route_name
+                client, body, headers, target_url, logger, display_name
             )
         except httpx.TimeoutException as e:
-            logger.log_error(route_name, 504, "Upstream timeout")
+            logger.log_error(display_name, 504, "Upstream timeout")
             raise UpstreamTimeoutError(
-                f"Timeout connecting to {route_name}", provider=route_name
+                f"Timeout connecting to {display_name}", provider=route
             ) from e
         except httpx.ConnectError as e:
-            logger.log_error(route_name, 502, str(e))
+            logger.log_error(display_name, 502, str(e))
             raise UpstreamConnectionError(
-                f"Connection error to {route_name}: {e}", provider=route_name
+                f"Connection error to {display_name}: {e}", provider=route
             ) from e
         except httpx.RequestError as e:
-            logger.log_error(route_name, 502, str(e))
+            logger.log_error(display_name, 502, str(e))
             raise UpstreamConnectionError(
-                f"Request error to {route_name}: {e}", provider=route_name
+                f"Request error to {display_name}: {e}", provider=route
             ) from e
 
     async def _count_tokens_request(

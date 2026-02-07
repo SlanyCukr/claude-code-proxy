@@ -49,9 +49,12 @@ class LimitsConfig(BaseModel):
     """Request limits settings."""
 
     max_body_size: int
-    timeout: float
     max_connections: int
     max_keepalive: int
+    keepalive_expiry: float
+    connect_timeout: float
+    pool_timeout: float
+    keep_alive_timeout: int
     subagent_tool_warning: int
     token_count_timeout: float
     message_timeout: float
@@ -61,6 +64,7 @@ class SanitizeConfig(BaseModel):
     """Request sanitization settings."""
 
     hidden_tools: list[str]
+    stripped_agents: list[str]
     strip_claude_md_markers: list[str]
 
 

@@ -1,6 +1,13 @@
-"""Shared logging utilities."""
+"""Shared logging utilities.
+
+All disk I/O is offloaded to a background thread pool so log writes
+never block the async event loop.
+"""
 
 import json
+import re
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -8,6 +15,19 @@ from uuid import uuid4
 
 LOG_ROOT = Path.cwd() / "logs"
 CLI_LOG_FILE = LOG_ROOT / "proxy.log"
+
+_log_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="log-writer")
+
+
+def clear_logs() -> None:
+    """Remove all log files. Called on proxy startup."""
+    if LOG_ROOT.exists():
+        shutil.rmtree(LOG_ROOT)
+
+
+def shutdown_log_executor() -> None:
+    """Drain pending writes and shut down the log thread pool."""
+    _log_executor.shutdown(wait=True)
 
 
 def extract_request_info(body: dict[str, Any]) -> tuple[str, list[str]]:
@@ -46,8 +66,8 @@ def write_incoming_log(
     path: str,
     headers: dict[str, str],
     body: Any,
-) -> Path:
-    """Write a single incoming request log entry."""
+) -> None:
+    """Write a single incoming request log entry (non-blocking)."""
     payload = {
         "timestamp": _utc_now(),
         "method": method,
@@ -57,7 +77,7 @@ def write_incoming_log(
     }
     session_id = _extract_session_id(body)
     folder = LOG_ROOT / "incoming" / session_id if session_id else LOG_ROOT / "incoming"
-    return _write_json(folder, payload)
+    _log_executor.submit(_write_json, folder, payload)
 
 
 def write_zai_log(
@@ -66,8 +86,8 @@ def write_zai_log(
     *,
     path: str,
     session_body: dict[str, Any] | None = None,
-) -> Path:
-    """Write a single z.ai request log entry."""
+) -> None:
+    """Write a single z.ai request log entry (non-blocking)."""
     payload = {
         "timestamp": _utc_now(),
         "target": "z.ai",
@@ -79,7 +99,7 @@ def write_zai_log(
     folder_body = session_body if session_body else body
     session_id = _extract_session_id(folder_body)
     folder = LOG_ROOT / "zai" / session_id if session_id else LOG_ROOT / "zai"
-    return _write_json(folder, payload)
+    _log_executor.submit(_write_json, folder, payload)
 
 
 def write_anthropic_log(
@@ -88,14 +108,18 @@ def write_anthropic_log(
     streaming: bool,
     *,
     path: str,
-) -> Path:
-    """Write a single Anthropic request log entry."""
+) -> None:
+    """Write a single Anthropic request log entry (non-blocking)."""
     session_id = _extract_session_id(body)
     folder = LOG_ROOT / "anthropic" / session_id if session_id else LOG_ROOT / "anthropic"
+    _log_executor.submit(_write_anthropic, folder, model, body, streaming, path)
 
-    # Cleanup old logs in session folder (keep only latest)
+
+def _write_anthropic(
+    folder: Path, model: str, body: dict[str, Any], streaming: bool, path: str
+) -> None:
+    """Anthropic log writer (runs in thread pool)."""
     _cleanup_session_folder(folder)
-
     payload = {
         "timestamp": _utc_now(),
         "target": "Anthropic",
@@ -104,7 +128,7 @@ def write_anthropic_log(
         "path": path,
         "body": body,
     }
-    return _write_json(folder, payload)
+    _write_json(folder, payload)
 
 
 def _cleanup_session_folder(folder: Path) -> int:
@@ -132,14 +156,19 @@ def write_cli_log(
     message: str,
     **extra: Any,
 ) -> None:
-    """Append a line to the rolling CLI log file."""
-    CLI_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    """Append a line to the rolling CLI log file (non-blocking)."""
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     extra_str = " ".join(f"{k}={v}" for k, v in extra.items()) if extra else ""
     line = f"[{timestamp}] {level}: {message}"
     if extra_str:
         line += f" {extra_str}"
     line += "\n"
+    _log_executor.submit(_append_cli_log, line)
+
+
+def _append_cli_log(line: str) -> None:
+    """Write a line to the CLI log file (runs in thread pool)."""
+    CLI_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with CLI_LOG_FILE.open("a") as f:
         f.write(line)
 
@@ -153,6 +182,9 @@ def _write_json(folder: Path, payload: dict[str, Any]) -> Path:
     return file_path
 
 
+_SAFE_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
 def _extract_session_id(body: Any) -> str | None:
     """Extract session_id from request body metadata.user_id."""
     if not isinstance(body, dict):
@@ -161,7 +193,9 @@ def _extract_session_id(body: Any) -> str | None:
     if not isinstance(user_id, str) or "session_" not in user_id:
         return None
     session_id = user_id.split("session_", 1)[-1]
-    return session_id or None
+    if not session_id or not _SAFE_SESSION_ID.match(session_id):
+        return None
+    return session_id
 
 def _redact_headers(headers: dict[str, str]) -> dict[str, str]:
     """Redact sensitive headers."""

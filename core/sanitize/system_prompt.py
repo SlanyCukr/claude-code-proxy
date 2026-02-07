@@ -1,8 +1,24 @@
 """System prompt replacement logic."""
 
+import logging
+from functools import cache
+from pathlib import Path
 from typing import Any
 
-from .patterns import get_default_system_prompt
+from core.exceptions import ConfigurationError
+
+logger = logging.getLogger(__name__)
+
+# System prompt file path
+_PROMPT_FILE = Path(__file__).parent.parent / "prompts" / "default_system.txt"
+
+
+@cache
+def get_default_system_prompt() -> str:
+    """Load the default system prompt (cached after first call)."""
+    if not _PROMPT_FILE.exists():
+        raise ConfigurationError(f"System prompt not found: {_PROMPT_FILE}")
+    return _PROMPT_FILE.read_text()
 
 
 def replace_system_prompt_inplace(
@@ -45,6 +61,8 @@ def _normalize_system(system_prompt: str, original_system: Any) -> Any:
                 replaced = True
             else:
                 updated.append(item)
+        if not replaced:
+            logger.warning("System prompt replacement failed: marker 'You are an interactive CLI tool' not found")
         return updated if replaced else original_system
 
     if isinstance(original_system, dict):
@@ -62,7 +80,7 @@ def extract_system_text(system: Any) -> str:
                 parts.append(str(item.get("text", "")))
             else:
                 parts.append(str(item))
-        return " ".join(parts)
+        return "\n".join(parts)
     return str(system) if system else ""
 
 

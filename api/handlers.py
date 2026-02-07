@@ -21,7 +21,11 @@ async def _parse_json_body(
     if len(raw_body) > max_body_size:
         raise RequestTooLarge("Request body too large")
 
-    text_body = raw_body.decode("utf-8", errors="replace")
+    try:
+        text_body = raw_body.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise InvalidJSON(f"Invalid UTF-8 encoding: {e}") from e
+
     try:
         body = json.loads(text_body)
     except JSONDecodeError as e:
@@ -54,17 +58,17 @@ async def _handle_proxy_request(
 
     routing_service = request.app.state.routing_service
     if endpoint == "/v1/messages":
-        route_name, target_url, upstream_headers, prepared_body = routing_service.prepare_messages(
+        route, target_url, upstream_headers, prepared_body = routing_service.prepare_messages(
             body, headers
         )
     else:
-        route_name, target_url, upstream_headers, prepared_body = routing_service.prepare_count_tokens(
+        route, target_url, upstream_headers, prepared_body = routing_service.prepare_count_tokens(
             body, headers
         )
 
     upstream = request.app.state.upstream_client
     return await upstream.proxy_request(
-        prepared_body, upstream_headers, target_url, logger, route_name, endpoint
+        prepared_body, upstream_headers, target_url, logger, route, endpoint
     )
 
 
@@ -81,7 +85,7 @@ async def handle_count_tokens(
     request: Request,
     config: Config,
     logger: Dashboard,
-) -> Response:
+) -> Response | StreamingResponse:
     """Handle /v1/messages/count_tokens endpoint."""
     return await _handle_proxy_request(request, config, logger, "/v1/messages/count_tokens")
 

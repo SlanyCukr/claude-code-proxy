@@ -13,31 +13,55 @@ base_url = "https://api.z.ai/api/anthropic"
 api_key = ""  # Required - get from z.ai dashboard
 
 [routing]
-# Patterns in system prompts that identify subagent requests (routed to z.ai)
+# Patterns that identify subagent requests (triggers sanitization)
 subagent_markers = [
-    # New zai-speckit-plugin agent patterns
-    "# Your Operating Instructions",
-    "These instructions define how you work.",
+    # Plugin agents
+    "# Codebase Explorer",
+    "# Build Agent",
+    "# Python Build Agent",
+    "# React/Next.js Build Agent",
+    "# Code Reviewer",
+    "# Root Cause Agent",
+    "# Context7 Docs Lookup",
+    "# Web Research Agent",
+    "# Chrome DevTools Agent",
+    "# Bash Commands Agent",
+    "# Security Reviewer",
+    "# TDD Guide",
+    "# E2E Test Runner",
+    "# Refactor & Dead Code Cleaner",
+    "# Software Architect",
+    "# Plan Refiner",
     # Built-in Claude Code agents (Explore, Plan, etc.)
     "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
 ]
-# Markers that force Anthropic routing (exclusions from z.ai)
+# Force Anthropic routing (everything EXCEPT codebase-explorer goes to Anthropic)
 anthropic_markers = [
-    # Built-in Plan/Design agent - keep visible in main session
-    "You are a software architect and planning specialist for Claude Code.",
-    # Web research agent - needs full Anthropic capabilities
-    "Assess First, Then Research",
-    # Build agents - route to Anthropic for better code quality
-    "Assess First, Then Act",      # build-agent, python-build-agent, react-nextjs-agent
-    "Assess First, Then Review",   # code-reviewer
-    "Assess First, Then Diagnose", # root-cause-agent
+    "# Build Agent",
+    "# Python Build Agent",
+    "# React/Next.js Build Agent",
+    "# Code Reviewer",
+    "# Root Cause Agent",
+    "# Context7 Docs Lookup",
+    "# Web Research Agent",
+    "# Chrome DevTools Agent",
+    "# Bash Commands Agent",
+    "# Security Reviewer",
+    "# TDD Guide",
+    "# E2E Test Runner",
+    "# Refactor & Dead Code Cleaner",
+    "# Software Architect",
+    "# Plan Refiner",
 ]
 
 [limits]
 max_body_size = 52428800    # 50MB
-timeout = 300.0             # 5 minutes
 max_connections = 100
 max_keepalive = 20
+keepalive_expiry = 120.0    # Idle connection lifetime before close (seconds)
+connect_timeout = 60.0      # TCP + TLS handshake timeout (seconds)
+pool_timeout = 10.0         # Connection pool acquisition timeout (seconds)
+keep_alive_timeout = 120    # Uvicorn inbound keep-alive timeout (seconds)
 subagent_tool_warning = 30  # Warn subagents after N tool uses (0 to disable)
 token_count_timeout = 60.0  # Timeout for /v1/messages/count_tokens endpoint (seconds)
 message_timeout = 300.0     # Timeout for /v1/messages endpoint (seconds)
@@ -45,13 +69,23 @@ message_timeout = 300.0     # Timeout for /v1/messages endpoint (seconds)
 [sanitize]
 # Tools to hide from main session (subagents use Task tool instead)
 hidden_tools = [
-    # Command execution - delegated to subagents
-    "Bash",
-    "KillShell",
     # Unused tools
     "NotebookEdit",
     "WebFetch",
     "WebSearch",
+    "ListMcpResourcesTool",
+    "ReadMcpResourceTool",
+]
+
+# Built-in agents to hide from Task tool description in main session
+# These are stripped so main session uses plugin agents instead
+stripped_agents = [
+    "general-purpose",
+    "statusline-setup",
+    "Explore",
+    "Plan",
+    "claude-code-guide",
+    "Bash",
 ]
 
 # Markers that identify subagents which DON'T need CLAUDE.md context

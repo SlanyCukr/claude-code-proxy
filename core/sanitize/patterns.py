@@ -1,27 +1,11 @@
 """Shared regex patterns and constants for request sanitization."""
 
 import re
-from functools import cache
-from pathlib import Path
-
-from core.exceptions import ConfigurationError
-
-# Default tools to strip from requests
-DEFAULT_STRIPPED_TOOLS = {"NotebookEdit", "WebFetch", "WebSearch"}
-
-# Default agent types to filter from Task tool description
-DEFAULT_STRIPPED_AGENTS = {
-    "general-purpose",
-    "statusline-setup",
-    "Explore",
-    "Plan",
-    "claude-code-guide",
-    "Bash",
-}
 
 # MCP tool handling
 MCP_TOOL_PREFIX = "mcp__"
-MCP_TOOL_ALLOWLIST = {"mcp__codex__codex", "mcp__codex__codex-reply"}
+MCP_TOOL_ALLOWLIST: set[str] = set()  # Exact tool names to allow
+MCP_TOOL_PREFIX_ALLOWLIST = {"mcp__semvex__"}  # Prefixes to allow (all tools from these servers)
 
 # Tool result stripping patterns
 TOOL_RESULT_OUTPUT_WRAPPER = re.compile(r"<output>\n\s*(.*?)\s*\n</output>", re.DOTALL)
@@ -54,16 +38,17 @@ BASH_AGENT_NEW_DESC = (
     "NEVER for: reading files, searching code, exploring codebase (use codebase-explorer instead)."
 )
 
+# Noise patterns in system-reminders (not user instructions, safe to strip)
+NOISE_REMINDER_MARKERS = [
+    "consider whether it would be considered malware",
+    "SessionStart:",
+    "UserPromptSubmit:",
+]
+
 # Malware reminder pattern
 MALWARE_REMINDER_PATTERN = re.compile(
     r"<system-reminder>\s*Whenever you read a file, you should consider whether "
     r"it would be considered malware\..*?</system-reminder>\s*",
-    re.DOTALL,
-)
-
-# Plan mode reminder pattern (embedded in tool_result content)
-PLAN_MODE_REMINDER_PATTERN = re.compile(
-    r"\n*<system-reminder>\s*Plan mode (?:is active|still active).*?</system-reminder>\s*",
     re.DOTALL,
 )
 
@@ -100,37 +85,32 @@ PLAN_MODE_REPLACEMENTS = [
         "- **zai-speckit-plugin:web-research**: Search for best practices, tutorials, error codes, or API docs not in Context7. "
         "Also useful when investigating issues to look up error messages or stack traces.",
     ),
+    # Plan agent replacements
+    (
+        "Launch Plan agent(s) to design the implementation",
+        "Launch zai-speckit-plugin:architect agent(s) to design the implementation",
+    ),
+    (
+        "Launch at least 1 Plan agent for most tasks",
+        "Launch at least 1 zai-speckit-plugin:architect agent for most tasks",
+    ),
 ]
 
 
-# Agent description patterns to strip from Task tool
-AGENT_PATTERNS = {
-    "general-purpose": re.compile(r"- general-purpose:.*?\(Tools:.*?\)\n", re.DOTALL),
-    "statusline-setup": re.compile(r"- statusline-setup:.*?\(Tools:.*?\)\n", re.DOTALL),
-    "Explore": re.compile(r"- Explore:.*?\(Tools:.*?\)\n", re.DOTALL),
-    "Plan": re.compile(r"- Plan:.*?\(Tools:.*?\)\n", re.DOTALL),
-    "claude-code-guide": re.compile(r"- claude-code-guide:.*?\(Tools:.*?\)\n", re.DOTALL),
-    "Bash": re.compile(r"- Bash:.*?\(Tools:.*?\)\n", re.DOTALL),
-}
+def build_agent_pattern(agent: str) -> re.Pattern[str]:
+    """Build regex pattern for stripping an agent from Task tool description.
 
-# System prompt file path
-_PROMPT_FILE = Path(__file__).parent.parent / "prompts" / "default_system.txt"
-
-
-@cache
-def get_default_system_prompt() -> str:
-    """Load the default system prompt (cached after first call)."""
-    if not _PROMPT_FILE.exists():
-        raise ConfigurationError(f"System prompt not found: {_PROMPT_FILE}")
-    return _PROMPT_FILE.read_text()
-
+    Agent patterns match format: "- AgentName: description (Tools: ...)\n"
+    Note: re.escape handles special chars in agent names (like "general-purpose")
+    """
+    return re.compile(rf"- {re.escape(agent)}:.*?\(Tools:.*?\)\n", re.DOTALL)
 
 # New Task tool opening text
 NEW_TASK_OPENING = (
     "Delegate work to agents that run in isolation. "
     "Preserves main session context while agents handle focused tasks.\n\n"
     "**How to use effectively:**\n"
-    "- Give ONE small, focused task per agent - broad tasks lead to incomplete work\n"
+    "- Give focused, precise, scoped task per agent - broad tasks lead to incomplete work\n"
     "- Agents start fresh with no prior context - provide everything they need:\n"
     "  - File paths to read (specs, docs, code to reference/modify)\n"
     "  - Exact commands if they need to run builds, tests, docker, pre-commit hooks\n"

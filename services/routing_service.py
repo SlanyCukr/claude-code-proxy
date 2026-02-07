@@ -4,16 +4,14 @@ from typing import Any
 
 from core.config import Config
 from core.headers import build_anthropic_headers, build_zai_headers
-from core.router import decide_route
+from core.router import Route, decide_route
 from core.sanitize import sanitize
-from core.sanitize.bash_description import strip_bash_description_inplace
 from core.sanitize.system_prompt import extract_system_text
 from core.tool_tracker import count_tool_uses, inject_tool_limit_reminder
-from core.transform import strip_anthropic_features
 from ui.dashboard import Dashboard
 
-# (route_name, target_url, headers, body)
-PreparedRequest = tuple[str, str, dict[str, str], dict[str, Any]]
+# (route, target_url, headers, body)
+PreparedRequest = tuple[Route, str, dict[str, str], dict[str, Any]]
 
 
 class RoutingService:
@@ -40,26 +38,35 @@ class RoutingService:
     def _sanitize_request(
         self,
         body: dict[str, Any],
-        is_zai: bool,
+        target_provider: Route,
+        is_subagent_request: bool,
         strip_claude_md: bool,
     ) -> dict[str, Any]:
         """Apply sanitization rules to request body.
 
         Args:
             body: Request body to sanitize
-            is_zai: Whether request is routed to z.ai
+            target_provider: Target provider ("anthropic" or "zai")
+            is_subagent_request: Whether this is a subagent request
             strip_claude_md: Whether to strip CLAUDE.md context
 
         Returns:
             Sanitized request body
         """
+        is_zai = target_provider == "zai"
+        # Strip tools only for main session to Anthropic
+        # Subagents (like web-research) need their tools even when routed to Anthropic
+        strip_tools = not is_zai and not is_subagent_request
         return sanitize(
             body,
+            target_provider=target_provider,
             strip_mcp=not is_zai,
             strip_claude_md=strip_claude_md,
-            strip_tools=not is_zai,
-            strip_post_env=is_zai,
+            strip_tools=strip_tools,
+            strip_post_env=True,
+            replace_system_prompt=not is_subagent_request,
             stripped_tools=set(self._config.sanitize.hidden_tools),
+            stripped_agents=self._config.sanitize.stripped_agents,
         )
 
     def _should_strip_claude_md(self, body: dict[str, Any]) -> bool:
@@ -96,21 +103,20 @@ class RoutingService:
         Returns:
             Prepared request tuple
         """
-        route = decide_route(body, self._subagent_markers, self._anthropic_markers)
-        is_zai = route == "zai"
+        route, is_subagent_request = decide_route(body, self._subagent_markers, self._anthropic_markers)
 
         # Keep MCP tools for z.ai subagents, strip for main session
         # Strip CLAUDE.md context only for specific subagents (configured markers)
-        strip_claude_md = is_zai and self._should_strip_claude_md(body)
-        body = self._sanitize_request(body, is_zai, strip_claude_md)
+        strip_claude_md = route == "zai" and self._should_strip_claude_md(body)
+        body = self._sanitize_request(body, route, is_subagent_request, strip_claude_md)
 
-        if is_zai:
+        if route == "zai":
             return self._prepare_zai(body, headers, path, is_messages)
         return self._prepare_anthropic(body, headers, path, is_messages)
 
     def _log_request(
         self,
-        route: str,
+        route: Route,
         model: str,
         body: dict[str, Any],
         path: str,
@@ -128,15 +134,10 @@ class RoutingService:
             session_body: Original session body (z.ai only)
         """
         if route == "anthropic":
-            if is_messages:
-                self._logger.log_anthropic(model, body, streaming=body.get("stream", False), path=path)
-            else:
-                self._logger.log_anthropic(model, body, path=path)
-        else:  # zai
-            if is_messages:
-                self._logger.log_zai(model, body, {}, path=path, session_body=session_body)
-            else:
-                self._logger.log_zai(model, body, {}, path=path)
+            streaming = is_messages and body.get("stream", False)
+            self._logger.log_anthropic(model, body, streaming=streaming, path=path)
+        else:
+            self._logger.log_zai(model, body, {}, path=path, session_body=session_body)
 
     def _prepare_anthropic(
         self,
@@ -149,7 +150,7 @@ class RoutingService:
         model = body.get("model", "unknown")
         upstream_headers = build_anthropic_headers(headers)
         self._log_request("anthropic", model, body, path, is_messages)
-        return "Anthropic", self._config.anthropic.base_url, upstream_headers, body
+        return "anthropic", self._config.anthropic.base_url, upstream_headers, body
 
     def _prepare_zai(
         self,
@@ -159,21 +160,19 @@ class RoutingService:
         is_messages: bool,
     ) -> PreparedRequest:
         """Prepare request for z.ai."""
-        original_body = body
+        # Note: inject_tool_limit_reminder returns a new dict, so session_body
+        # remains unchanged even after body is reassigned
+        session_body = body
         model = body.get("model", "unknown")
 
         if is_messages:
-            body = strip_anthropic_features(body)
-            strip_bash_description_inplace(body)
             threshold = self._config.limits.subagent_tool_warning
             if threshold > 0:
                 tool_count = count_tool_uses(body.get("messages", []))
                 body = inject_tool_limit_reminder(body, tool_count, threshold)
-            self._log_request("zai", model, body, path, is_messages, session_body=original_body)
+            self._log_request("zai", model, body, path, is_messages, session_body=session_body)
         else:
-            body = strip_anthropic_features(body)
-            strip_bash_description_inplace(body)
             self._log_request("zai", model, body, path, is_messages)
 
         upstream_headers = build_zai_headers(headers, self._config.zai.api_key)
-        return "z.ai", self._config.zai.base_url, upstream_headers, body
+        return "zai", self._config.zai.base_url, upstream_headers, body

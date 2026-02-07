@@ -20,24 +20,26 @@ OAUTH_TOKEN_URL = "https://claude.ai/oauth/token"
 
 
 def load_tokens() -> dict | None:
-    """Load OAuth tokens - first try our file, then fall back to Claude Code's."""
+    """Load OAuth tokens - first try our file, then fall back to Claude Code's.
+
+    Returns:
+        Token dict if valid tokens are available, None if no credentials exist.
+
+    Raises:
+        TokenRefreshError: If credentials exist but token refresh fails.
+        json.JSONDecodeError: If credential files contain invalid JSON.
+    """
     # Try our own tokens first
     if TOKENS_FILE.exists():
         tokens = json.loads(TOKENS_FILE.read_text())
         if tokens.get("expires_at", 0) > time.time():
             return tokens
         if "refresh_token" in tokens:
-            refreshed = refresh_tokens(tokens["refresh_token"])
-            if refreshed:
-                return refreshed
+            return refresh_tokens(tokens["refresh_token"])
 
     # Fall back to Claude Code's credentials
     if CLAUDE_CODE_CREDENTIALS.exists():
-        try:
-            creds = json.loads(CLAUDE_CODE_CREDENTIALS.read_text())
-        except json.JSONDecodeError as e:
-            console.print(f"[red]Invalid JSON in Claude Code credentials:[/red] {e}")
-            return None
+        creds = json.loads(CLAUDE_CODE_CREDENTIALS.read_text())
 
         oauth = creds.get("claudeAiOauth", {})
         if not oauth:
@@ -68,8 +70,16 @@ def save_tokens(tokens: dict):
     TOKENS_FILE.chmod(0o600)
 
 
-def refresh_tokens(refresh_token: str) -> dict | None:
-    """Refresh OAuth tokens."""
+class TokenRefreshError(Exception):
+    """Raised when token refresh fails (credentials exist but refresh didn't work)."""
+
+
+def refresh_tokens(refresh_token: str) -> dict:
+    """Refresh OAuth tokens.
+
+    Raises:
+        TokenRefreshError: If the refresh request fails for any reason.
+    """
     try:
         response = httpx.post(
             OAUTH_TOKEN_URL,
@@ -79,20 +89,17 @@ def refresh_tokens(refresh_token: str) -> dict | None:
             },
         )
     except httpx.RequestError as e:
-        console.print(f"[red]Token refresh network error:[/red] {e}")
-        return None
+        raise TokenRefreshError(f"Token refresh network error: {e}") from e
 
     if response.status_code != 200:
-        console.print(
-            f"[red]Token refresh failed:[/red] {response.status_code} - {response.text}"
+        raise TokenRefreshError(
+            f"Token refresh failed: {response.status_code} - {response.text}"
         )
-        return None
 
     try:
         data = response.json()
     except json.JSONDecodeError as e:
-        console.print(f"[red]Token refresh returned invalid JSON:[/red] {e}")
-        return None
+        raise TokenRefreshError(f"Token refresh returned invalid JSON: {e}") from e
 
     tokens = {
         "access_token": data.get("access_token"),
@@ -110,7 +117,11 @@ def is_authenticated() -> bool:
 
 def print_auth_status() -> None:
     """Print authentication status to console."""
-    tokens = load_tokens()
+    try:
+        tokens = load_tokens()
+    except (TokenRefreshError, json.JSONDecodeError) as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        return
     if tokens:
         console.print(
             f"[green]Authenticated[/green] (expires {time.ctime(tokens['expires_at'])})"
